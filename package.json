@@ -1,0 +1,64 @@
+{
+  "name": "storymap.md",
+  "version": "0.1.0",
+  "description": "User story maps built from the Backlog.md Markdown already in your repository. Local files, local browser, no database.",
+  "keywords": [
+    "story-map",
+    "user-story-mapping",
+    "backlog",
+    "backlog.md",
+    "markdown",
+    "product-management",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Zorion SRL",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zorion-ro/StoryMap.md.git"
+  },
+  "homepage": "https://github.com/Zorion-ro/StoryMap.md#readme",
+  "bugs": {
+    "url": "https://github.com/Zorion-ro/StoryMap.md/issues"
+  },
+  "bin": {
+    "storymap": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && node scripts/copy-static.mjs",
+    "dev": "tsx src/cli.ts browser",
+    "start": "tsx src/cli.ts browser",
+    "validate": "tsx src/cli.ts validate",
+    "doctor": "tsx src/cli.ts doctor",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "npm run typecheck",
+    "test": "tsx --test tests/*.test.ts src/core/*.test.ts",
+    "pack:check": "npm run build && npm pack --dry-run",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^20",
+    "tsx": "^4.19.2",
+    "typescript": "^5.9.3"
+  }
+}

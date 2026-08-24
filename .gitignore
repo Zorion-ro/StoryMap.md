@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Packing artifacts
+*.tgz
+
+# Test output
+coverage/
+
+# Local environment — never commit real values.
+# `.env.example` is deliberately allowed through.
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.DS_Store
+*.swp
+.idea/
+.vscode/
