@@ -7,8 +7,10 @@ on:
     branches: [main]
 
 jobs:
-  build:
-    name: Node ${{ matrix.node }}
+  # The job id and the matrix value produce the check names branch protection
+  # requires: `CI / test (20)` and `CI / test (22)`. Do not add a `name:` here —
+  # it would override those and silently make the required checks unreportable.
+  test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
