@@ -41,7 +41,7 @@ function str(value: unknown): string | undefined {
 }
 
 export function createApp(project: Project) {
-  const host = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory);
+  const host = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory, project.completedStatuses);
   const app = express();
   app.disable('x-powered-by');
 

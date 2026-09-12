@@ -136,6 +136,14 @@ describe('project configuration', () => {
     assert.equal(project.storyMapsDirectory, 'work-items/story-maps');
   });
 
+  test('backlog.completedStatuses is read, and must be a list', () => {
+    const root = backlogProject({ storymapConfig: 'schemaVersion: 1\nbacklog:\n  completedStatuses:\n    - Done\n' });
+    assert.deepEqual(loadProject(discoverProject(root)!).completedStatuses, ['Done']);
+    assert.deepEqual(loadProject(discoverProject(backlogProject())!).completedStatuses, [], 'none unless declared');
+    const bad = backlogProject({ storymapConfig: 'schemaVersion: 1\nbacklog:\n  completedStatuses: Done\n' });
+    assert.throws(() => loadProject(discoverProject(bad)!), /completedStatuses` must be a list/);
+  });
+
   test('an unsupported schemaVersion is refused by name', () => {
     const root = backlogProject({ storymapConfig: 'schemaVersion: 2\n' });
     assert.throws(() => loadProject(discoverProject(root)!), (error: unknown) => {

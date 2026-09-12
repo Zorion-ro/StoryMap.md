@@ -60,8 +60,9 @@ export class Workspace {
     backlogDirectory = DEFAULT_BACKLOG_DIRECTORY,
     now = new Date(),
     storyMapsDirectory?: string,
+    completedStatuses: readonly string[] = [],
   ): Workspace {
-    const paths = resolveBacklogPaths(repoRoot, backlogDirectory, storyMapsDirectory);
+    const paths = resolveBacklogPaths(repoRoot, backlogDirectory, storyMapsDirectory, completedStatuses);
     return new Workspace(paths, readBacklog(paths), readStoryMaps(paths), readMilestones(paths), now);
   }
 
@@ -144,8 +145,9 @@ export class WorkspaceHost {
     readonly repoRoot: string,
     readonly backlogDirectory = DEFAULT_BACKLOG_DIRECTORY,
     readonly storyMapsDirectory?: string,
+    readonly completedStatuses: readonly string[] = [],
   ) {
-    this.current = Workspace.load(repoRoot, backlogDirectory, new Date(), storyMapsDirectory);
+    this.current = Workspace.load(repoRoot, backlogDirectory, new Date(), storyMapsDirectory, completedStatuses);
     this.stamp = fingerprint(repoRoot, backlogDirectory, storyMapsDirectory);
   }
 
@@ -153,7 +155,13 @@ export class WorkspaceHost {
   get(): Workspace {
     const next = fingerprint(this.repoRoot, this.backlogDirectory, this.storyMapsDirectory);
     if (next !== this.stamp) {
-      this.current = Workspace.load(this.repoRoot, this.backlogDirectory, new Date(), this.storyMapsDirectory);
+      this.current = Workspace.load(
+        this.repoRoot,
+        this.backlogDirectory,
+        new Date(),
+        this.storyMapsDirectory,
+        this.completedStatuses,
+      );
       this.stamp = next;
       this.version += 1;
     }

@@ -22,6 +22,16 @@ export interface Project {
   /** Name shown in the browser header. */
   projectName: string;
   port: number;
+  /**
+   * Statuses that mean the work is delivered, from `backlog.completedStatuses`.
+   *
+   * Backlog.md itself has no terminal-status concept: it archives by moving a
+   * file into `completed/`. A project whose workflow ends in a named status
+   * (`Released`, say) would otherwise show every delivered item
+   * as active, because the directory is the only signal. Empty by default, so
+   * a project that says nothing keeps the directory-only behaviour.
+   */
+  completedStatuses: string[];
   storymapConfigPath?: string;
   backlogConfigPath?: string;
   /** Nearest enclosing Git repository, when the project is inside one. */
@@ -64,6 +74,10 @@ function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function strList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(str).filter((v): v is string => v !== undefined);
+}
 function section(doc: Record<string, unknown>, key: string): Record<string, unknown> {
   const value = doc[key];
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
@@ -135,6 +149,15 @@ export function loadProject(discovery: Discovery): Project {
   const declaredMaps = str(mapsSection.directory) ?? `${backlogDirectory}/story-maps`;
   const storyMapsDirectory = containedDirectory(root, declaredMaps, 'storyMaps.directory', where);
 
+  const rawCompleted = backlogSection.completedStatuses;
+  if (rawCompleted !== undefined && !Array.isArray(rawCompleted)) {
+    throw new ConfigError(
+      `\`backlog.completedStatuses\` must be a list of status names, got ${JSON.stringify(rawCompleted)}`,
+      where,
+    );
+  }
+  const completedStatuses = strList(rawCompleted);
+
   const rawPort = browserSection.port;
   if (rawPort !== undefined && (typeof rawPort !== 'number' || !Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535)) {
     throw new ConfigError(`\`browser.port\` must be an integer between 1 and 65535, got ${JSON.stringify(rawPort)}`, where);
@@ -146,6 +169,7 @@ export function loadProject(discovery: Discovery): Project {
     storyMapsDirectory,
     projectName: str(storymapDoc.projectName) ?? str(backlogDoc.project_name) ?? basename(root),
     port: typeof rawPort === 'number' ? rawPort : DEFAULT_PORT,
+    completedStatuses,
     ...(discovery.storymapConfigPath ? { storymapConfigPath: discovery.storymapConfigPath } : {}),
     ...(discovery.backlogConfigPath ? { backlogConfigPath: discovery.backlogConfigPath } : {}),
     ...(discovery.gitRoot ? { gitRoot: discovery.gitRoot } : {}),
