@@ -10,7 +10,7 @@ page, and a spatial story-map wall with activities across the top and release or
 workflow lanes down the side.
 
 There is no database, no account and no server to deploy. Your files are the
-truth; the tool is a reader.
+truth; the tool reads them, and writes back only the edits you apply.
 
 ```text
 Markdown work items
@@ -89,6 +89,47 @@ storymap browser --host 127.0.0.1
 The default bind address is `127.0.0.1` and it stays that way: the server reads
 your working files and applies no authentication. If the port is busy the
 command fails and says so rather than attaching to whatever is there.
+
+#### Stories: filters, bulk edit and Kanban
+
+The Stories page filters every categorical field (`state`, `status`, `wstatus`,
+`area`, `owner`, `priority`, `wtype`, `map`, `milestone`) with **is** or
+**is not** and any number of values. Values inside one field are ORed, different
+fields are ANDed, **is not** means NOT IN, and `none` means "no value":
+
+```text
+/?status=Backlog&status=Ready                    status IS Backlog OR Ready
+/?status=Done&status=Cancelled&status.op=not     status NOT IN [Done, Cancelled]
+/?wtype=defect&wtype=feature&owner=platform      ... AND owner IS platform
+/?map=none                                       on no story map
+```
+
+Every filter is in the URL, so it bookmarks, survives a reload and works with
+back and forward. Single-value URLs from earlier versions mean what they meant.
+`priority` is the `priority:` label scale; Backlog.md's own `high`, `medium`
+and `low` still match the native field.
+
+`?view=kanban` shows the same filtered stories as a board grouped the way the
+Backlog.md board groups them: one column per status in `backlog.config.yml`,
+optional milestone lanes (`&lanes=milestone`), and cards ordered by `ordinal`,
+then creation date. A status the config does not declare gets its own
+read-only column rather than disappearing.
+
+Select stories (click, Shift-click for a range, **Select all shown**, or
+Ctrl/Cmd-click on the board) to edit `status`, `wstatus`, `area`, `owner`,
+`priority`, `wtype`, `map` and `milestone` together. Fields left on
+**No change** are not touched; **Clear** removes a label, the milestone, or the
+story from every map. The review step says how many stories will change and to
+what before anything is written. Dragging a card to another column changes its
+status; dragging one of several selected cards moves them all, after the same
+review.
+
+Edits are the only writes the browser makes, and they are deliberately narrow:
+the whole request is validated first (statuses from `backlog.config.yml`,
+declared milestones, existing map cells), each file gets a minimal line edit
+that is re-parsed and checked before it is written, a file changed on disk since
+the review is a conflict, and a request is all-or-nothing. `map` changes edit the
+map YAML, never the story.
 
 ### `storymap validate`
 
@@ -205,10 +246,13 @@ A story placed in a cell appears as a card there.
 
 ## Backlog.md compatibility
 
-Backlog.md Markdown remains the canonical work-item data. StoryMap.md reads it
-and never writes it: no command edits a work item, renames a file or touches
-`backlog.config.yml`. The only file StoryMap.md writes is its own
-`storymap.config.yml`, and only when you run `init`.
+Backlog.md Markdown remains the canonical work-item data. StoryMap.md reads it,
+and changes it only when you apply a bulk edit or move a card on the Stories
+board: then it rewrites exactly the front-matter lines for `status`, `milestone`,
+the edited labels and `updated_date` (in Backlog.md's UTC `YYYY-MM-DD HH:MM`
+form), validates statuses against `backlog.config.yml` as Backlog.md does, and
+never renames a file or touches `backlog.config.yml`. `init` writes
+`storymap.config.yml`.
 
 Compatibility is a matter of file format. StoryMap.md is **not affiliated with,
 endorsed by, or maintained by the Backlog.md project**, and contains none of its
@@ -244,7 +288,10 @@ map has to show delivered work in its journey position.
 
 - binds `127.0.0.1` unless you override it
 - serves its own packaged CSS and JS, and nothing else from your disk
-- writes nothing except `storymap.config.yml`, and only when you run `init`
+- writes work items and maps only when you apply an edit in the browser, and
+  `storymap.config.yml` only when you run `init`
+- accepts an edit only as a same-origin JSON request to the address it was
+  started on
 - no telemetry, no update check, no network calls at all
 
 ## Develop
@@ -254,7 +301,7 @@ git clone https://github.com/Zorion-ro/StoryMap.md.git
 cd StoryMap.md
 
 npm ci
-npm test          # 205 tests
+npm test          # 274 tests
 npm run typecheck
 npm run build
 npm pack

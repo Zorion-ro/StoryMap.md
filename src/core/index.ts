@@ -6,4 +6,7 @@ export * from './resolver';
 export * from './validator';
 export * from './workspace';
 export * from './queries';
+export * from './story-query';
+export * from './kanban';
+export * from './story-edit';
 export * from './visual-model';

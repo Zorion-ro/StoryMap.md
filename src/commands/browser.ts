@@ -90,7 +90,7 @@ export async function runBrowser(args: Args, cwd: string): Promise<number> {
   const host = typeof args.flags.get('host') === 'string' ? String(args.flags.get('host')) : DEFAULT_HOST;
   const shouldOpen = args.flags.get('open') !== false;
 
-  const { app, host: workspaceHost } = createApp(project);
+  const { app, host: workspaceHost } = createApp(project, { host });
   const ws = workspaceHost.get();
   const httpServer = createServer(app);
   await listen(httpServer, chosenPort, host);

@@ -1,5 +1,4 @@
 import type {
-  Facets,
   ResolvedStoryMap,
   ValidationReport,
   WorkItem,
@@ -8,7 +7,6 @@ import type {
 import { criteriaSummary } from '../core';
 import { esc, markdown, q } from './html';
 import {
-  criteriaBadge,
   labelChips,
   missingCard,
   priorityPill,
@@ -28,103 +26,6 @@ function queryString(base: Query, overrides: Query): string {
     parts.push(`${q(key)}=${q(value)}`);
   }
   return parts.length ? `?${parts.join('&')}` : '';
-}
-
-function select(name: string, current: string | undefined, options: { value: string; label: string }[], base: Query): string {
-  const opts = options
-    .map((o) => `<option value="${esc(o.value)}"${current === o.value ? ' selected' : ''}>${esc(o.label)}</option>`)
-    .join('');
-  return `<label class="f"><span>${esc(name)}</span><select name="${esc(name)}" data-base="${esc(queryString(base, { [name]: '' }))}">${opts}</select></label>`;
-}
-
-function facetOptions(name: string, facet: { value: string; count: number }[]): { value: string; label: string }[] {
-  return [
-    { value: '', label: `all ${name}` },
-    ...facet.map((f) => ({ value: f.value, label: `${f.value} (${f.count})` })),
-  ];
-}
-
-// ------------------------------------------------------------------ stories
-
-export function storiesView(opts: {
-  items: WorkItem[];
-  total: number;
-  facets: Facets;
-  query: Query;
-  maps: { id: string; title: string }[];
-  milestones: { id: string; title: string }[];
-  membership: Map<string, Set<string>>;
-}): string {
-  const { items, total, facets, query, maps, milestones } = opts;
-  const base: Query = { ...query };
-  delete base.id;
-
-  const rows = items
-    .map((item) => {
-      const s = criteriaSummary(item);
-      return `<tr class="row" data-href="/story/${q(item.id)}">
-  <td class="c-id"><a href="/story/${q(item.id)}">${esc(item.id)}</a></td>
-  <td class="c-title"><a href="/story/${q(item.id)}">${esc(item.title)}</a></td>
-  <td class="c-state">${statePill(item)}</td>
-  <td class="c-status">${statusPill(item)}</td>
-  <td class="c-wstatus">${wstatusPill(item)}</td>
-  <td class="c-prio">${priorityPill(item)}</td>
-  <td class="c-area">${item.area ? `<a class="chip ns-area" href="/?area=${q(item.area)}">${esc(item.area)}</a>` : ''}</td>
-  <td class="c-owner">${item.owner ? `<a class="chip ns-owner" href="/?owner=${q(item.owner)}">${esc(item.owner)}</a>` : ''}</td>
-  <td class="c-type">${esc(item.wtype ?? '')}</td>
-  <td class="c-deps">${item.dependencies.map((d) => `<a class="dep" href="/story/${q(d)}">${esc(d)}</a>`).join(' ')}</td>
-  <td class="c-ac" title="${s.total ? `${s.checked} of ${s.total} acceptance criteria checked` : 'no checkbox criteria'}">${criteriaBadge(item)}</td>
-</tr>`;
-    })
-    .join('\n');
-
-  const filters = `
-<form class="filters" method="get" action="/">
-  <label class="f grow"><span>search</span><input type="search" name="text" value="${esc(query.text ?? '')}" placeholder="id, title, label or body…" /></label>
-  ${select('state', query.state, [
-    { value: '', label: 'active + completed' },
-    { value: 'active', label: 'active only' },
-    { value: 'completed', label: 'completed only' },
-  ], base)}
-  ${select('status', query.status, facetOptions('status', facets.status), base)}
-  ${select('wstatus', query.wstatus, facetOptions('wstatus', facets.wstatus), base)}
-  ${select('area', query.area, facetOptions('area', facets.area), base)}
-  ${select('owner', query.owner, facetOptions('owner', facets.owner), base)}
-  ${select('priority', query.priority, facetOptions('priority', facets.priority), base)}
-  ${select('wtype', query.wtype, facetOptions('wtype', facets.wtype), base)}
-  ${select('map', query.map, [
-    { value: '', label: 'any map' },
-    { value: 'none', label: 'not on any map' },
-    ...maps.map((m) => ({ value: m.id, label: m.title })),
-  ], base)}
-  ${select('milestone', query.milestone, [
-    { value: '', label: 'any milestone' },
-    { value: 'none', label: 'no milestone' },
-    ...milestones.map((m) => {
-      const n = facets.milestone.find((f) => f.value === m.id)?.count ?? 0;
-      return { value: m.id, label: `${m.title} (${n})` };
-    }),
-  ], base)}
-  <button type="submit" class="btn">Apply</button>
-  <a class="btn ghost" href="/">Reset</a>
-</form>`;
-
-  return `<section class="page">
-  <div class="page-head">
-    <h1>Stories</h1>
-    <p class="count"><strong>${items.length}</strong> shown of ${total} work items</p>
-  </div>
-  ${filters}
-  <div class="table-scroll">
-  <table class="stories">
-    <thead><tr>
-      <th>ID</th><th>Title</th><th>State</th><th>Status</th><th>Delivery</th><th>Pri</th>
-      <th>Area</th><th>Owner</th><th>Type</th><th>Depends on</th><th title="acceptance criteria checked">AC</th>
-    </tr></thead>
-    <tbody>${rows || '<tr><td colspan="11" class="empty">No stories match these filters.</td></tr>'}</tbody>
-  </table>
-  </div>
-</section>`;
 }
 
 // ------------------------------------------------------------- story detail

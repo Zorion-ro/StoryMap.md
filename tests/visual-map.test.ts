@@ -416,7 +416,9 @@ describe('workflow lanes, work type, legend and shell', () => {
   test('the stories page filters by milestone too', async () => {
     assert.match((await get('/?milestone=m-0')).body, /<strong>1<\/strong> shown of 4/);
     assert.match((await get('/?milestone=none')).body, /<strong>3<\/strong> shown of 4/);
-    assert.ok((await get('/')).body.includes('any milestone'));
+    const page = (await get('/')).body;
+    assert.ok(page.includes('data-field="milestone"'), 'the milestone filter control is on the page');
+    assert.ok(page.includes('no milestone'));
   });
 
   test('the story detail names its milestone and links back to the filter', async () => {

@@ -3,14 +3,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   WorkspaceHost,
+  buildKanban,
   buildMapMembership,
+  commitStoryEdit,
   facets,
   filterStories,
   normalizeId,
+  parseEditRequest,
+  parseStoryQuery,
+  planStoryEdit,
   validate,
   buildVisualStoryMap,
 } from './core';
-import type { StoryFilter, WorkItem } from './core';
+import type { EditPlan, FilterField, WorkItem } from './core';
 import { layout } from './render/layout';
 import { visualMapView } from './render/visual-map';
 import {
@@ -19,9 +24,9 @@ import {
   mapView,
   mapsIndexView,
   notFoundView,
-  storiesView,
   storyDetailView,
 } from './render/views';
+import { storiesPage } from './render/stories';
 import { computeCoverage } from './coverage';
 import type { NavMap } from './render/layout';
 import { esc } from './render/html';
@@ -40,7 +45,30 @@ function str(value: unknown): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-export function createApp(project: Project) {
+/** Browser scripts the server may serve; anything else under /static is a 404. */
+const STATIC_SCRIPTS = new Set(['app.js', 'stories.js', 'selection.js']);
+
+export interface AppOptions {
+  /**
+   * The host the server was asked to bind. Mutations accept a request only when
+   * its Host header names a loopback address or this host, which is what stops a
+   * DNS-rebinding page from posting to the local server under its own name.
+   */
+  host?: string;
+}
+
+function hostnameOf(hostHeader: string | undefined): string | undefined {
+  if (!hostHeader) return undefined;
+  try {
+    return new URL(`http://${hostHeader}`).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return undefined;
+  }
+}
+
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
+
+export function createApp(project: Project, options: AppOptions = {}) {
   const host = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory);
   const app = express();
   app.disable('x-powered-by');
@@ -79,8 +107,9 @@ export function createApp(project: Project) {
   app.get('/static/app.css', (_req, res) => {
     res.type('text/css').send(readFileSync(join(STATIC_DIR, 'app.css'), 'utf8'));
   });
-  app.get('/static/app.js', (_req, res) => {
-    res.type('text/javascript').send(readFileSync(join(STATIC_DIR, 'app.js'), 'utf8'));
+  app.get('/static/:script', (req, res, next) => {
+    if (!STATIC_SCRIPTS.has(req.params.script)) return next();
+    res.type('text/javascript').send(readFileSync(join(STATIC_DIR, req.params.script), 'utf8'));
   });
 
   /** Polled by the page so an edit by Claude or a peer lane shows up without a manual reload. */
@@ -113,41 +142,172 @@ export function createApp(project: Project) {
 
   app.get('/', (req, res) => {
     const ws = host.get();
-    const query: Record<string, string | undefined> = {
-      text: str(req.query.text),
-      state: str(req.query.state),
-      status: str(req.query.status),
-      area: str(req.query.area),
-      owner: str(req.query.owner),
-      priority: str(req.query.priority),
-      wstatus: str(req.query.wstatus),
-      wtype: str(req.query.wtype),
-      map: str(req.query.map),
-      milestone: str(req.query.milestone),
-    };
+    const query = parseStoryQuery(req.query as Record<string, unknown>);
+    const view = str(req.query.view) === 'kanban' ? 'kanban' : 'list';
+    const laneMode = str(req.query.lanes) === 'milestone' ? 'milestone' : 'none';
     const membership = buildMapMembership(ws);
-    const filter: StoryFilter = query;
-    const items = filterStories(ws, filter, membership).sort(compareStories);
+    const items = filterStories(ws, query, membership).sort(compareStories);
+    const all = ws.index.items;
+
+    const mapCounts = new Map<string, number>();
+    for (const maps of membership.values()) for (const id of maps) mapCounts.set(id, (mapCounts.get(id) ?? 0) + 1);
+    const noneCounts: Partial<Record<FilterField, number>> = {
+      wstatus: all.filter((i) => !i.wstatus).length,
+      area: all.filter((i) => !i.area).length,
+      owner: all.filter((i) => !i.owner).length,
+      priority: all.filter((i) => !i.priorityLabel).length,
+      wtype: all.filter((i) => !i.wtype).length,
+      milestone: all.filter((i) => !i.milestone).length,
+    };
+    const statuses = project.statuses.length ? project.statuses : facets(all).status.map((f) => f.value);
+    const milestones = ws.milestones.map((m) => ({ id: m.id, title: m.title, archived: m.archived }));
+
     res.send(
       layout({
         title: 'Stories',
         nav: 'stories',
         revision: host.revision,
+        wide: view === 'kanban',
+        scripts: ['selection.js', 'stories.js'],
         ...shell(ws),
-        body: storiesView({
+        body: storiesPage({
           items,
           total: ws.index.size,
-          facets: facets(ws.index.items),
+          facets: facets(all),
           query,
-          maps: ws.maps.map((m) => ({ id: m.id, title: m.title })),
-          milestones: ws.milestones.map((m) => ({
-            id: m.id,
-            title: m.archived ? `${m.title} (archived)` : m.title,
-          })),
-          membership,
+          view,
+          laneMode,
+          board:
+            view === 'kanban'
+              ? buildKanban(items, {
+                  statuses: project.statuses,
+                  statusFilter: query.fields.status,
+                  laneMode,
+                  milestones,
+                  tiebreak: compareStories,
+                })
+              : undefined,
+          maps: ws.maps,
+          mapCounts,
+          noMapCount: all.filter((i) => !(membership.get(normalizeId(i.id))?.size)).length,
+          milestones,
+          statuses,
+          stateCounts: { active: ws.index.active.length, completed: ws.index.completed.length },
+          noneCounts,
         }),
       }),
     );
+  });
+
+  // ------------------------------------------------------------- mutations
+
+  /**
+   * The server has no accounts, so a mutation is authorised by being a
+   * same-origin JSON request to a host this process answers for. That rules
+   * out a form post or `no-cors` fetch from another site (neither can send
+   * application/json without a preflight this server never grants), a
+   * cross-origin fetch (Origin mismatch) and DNS rebinding (Host allowlist).
+   */
+  const guardMutation: express.RequestHandler = (req, res, next) => {
+    const hostname = hostnameOf(req.headers.host);
+    const allowed = hostname && (LOOPBACK.has(hostname) || (options.host !== undefined && hostname === options.host));
+    if (!allowed) {
+      res.status(403).json({ ok: false, error: 'forbidden', message: 'mutations are accepted only on the address the server was started on' });
+      return;
+    }
+    const origin = req.headers.origin;
+    if (origin !== undefined) {
+      let originHost: string | undefined;
+      try {
+        originHost = new URL(origin).host;
+      } catch {
+        originHost = undefined;
+      }
+      if (originHost !== req.headers.host) {
+        res.status(403).json({ ok: false, error: 'forbidden', message: 'cross-origin mutations are refused' });
+        return;
+      }
+    }
+    if (!req.is('application/json')) {
+      res.status(415).json({ ok: false, error: 'unsupported_media_type', message: 'send the request as application/json' });
+      return;
+    }
+    next();
+  };
+
+  const summarise = (plan: EditPlan) =>
+    plan.items.map((i) => ({
+      id: i.id,
+      changed: i.changed,
+      changes: i.changes,
+      warnings: i.warnings,
+      ...(i.error ? { error: i.error } : {}),
+    }));
+
+  /**
+   * Bulk edit, and the Kanban move behind a drag: `{ ids, changes, dryRun?, token? }`.
+   *
+   * A dry run validates and describes the change without writing and returns a
+   * token. Applying with that token refuses (409) if any file it read has
+   * changed since; applying without one plans and writes in one step.
+   */
+  app.post('/api/stories/bulk', guardMutation, express.json({ limit: '1mb' }), (req, res) => {
+    const request = parseEditRequest(req.body);
+    if (request.errors.length) {
+      res.status(400).json({ ok: false, error: 'invalid_request', fieldErrors: request.errors });
+      return;
+    }
+    const ws = host.refresh();
+    const plan = planStoryEdit(ws, request.ids, request.changes, { statuses: project.statuses });
+    const body = req.body as { dryRun?: unknown; token?: unknown };
+    if (!plan.ok) {
+      res.status(422).json({
+        ok: false,
+        error: 'validation',
+        message: 'Nothing was changed: fix the problems listed and try again.',
+        fieldErrors: plan.fieldErrors,
+        items: summarise(plan),
+      });
+      return;
+    }
+    if (body.dryRun === true) {
+      res.json({
+        ok: true,
+        dryRun: true,
+        token: plan.token,
+        selected: plan.items.length,
+        changedCount: plan.changedCount,
+        changes: plan.changes,
+        files: plan.writes.map((w) => w.sourcePath),
+        items: summarise(plan),
+      });
+      return;
+    }
+    if (typeof body.token === 'string' && body.token !== plan.token) {
+      res.status(409).json({
+        ok: false,
+        error: 'conflict',
+        message: 'These stories or maps changed on disk after you reviewed the edit. Nothing was changed; review it again.',
+      });
+      return;
+    }
+    const result = plan.writes.length ? commitStoryEdit(plan) : ({ ok: true, written: [] } as const);
+    host.refresh();
+    if (result.ok) {
+      res.json({ ok: true, dryRun: false, changedCount: plan.changedCount, changes: plan.changes, written: result.written, items: summarise(plan) });
+    } else if (result.reason === 'conflict') {
+      res.status(409).json({ ok: false, error: 'conflict', message: `${result.message}. Nothing was changed; review the edit again.` });
+    } else {
+      res.status(500).json({
+        ok: false,
+        error: 'write_failed',
+        message: result.rolledBack
+          ? `${result.message}. Every file already replaced was restored, so nothing was changed.`
+          : `${result.message}. These files could not be restored and now hold the new values: ${result.notRestored.join(', ')}.`,
+        rolledBack: result.rolledBack,
+        notRestored: result.notRestored,
+      });
+    }
   });
 
   app.get('/story/:id', (req, res) => {

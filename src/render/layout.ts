@@ -24,6 +24,8 @@ export interface LayoutOptions {
   /** The project being browsed, shown left of the tool name in the header. */
   projectName: string;
   version: string;
+  /** Page-specific scripts, served from `/static`, loaded after `app.js`. */
+  scripts?: string[];
 }
 
 /**
@@ -148,6 +150,7 @@ export function layout(o: LayoutOptions): string {
 </div>
 <div id="reload-toast" hidden>Files changed on disk — <button type="button" id="reload-now">reload</button></div>
 <script src="/static/app.js" defer></script>
+${(o.scripts ?? []).map((src) => `<script src="/static/${q(src)}" defer></script>`).join('\n')}
 </body>
 </html>`;
 }

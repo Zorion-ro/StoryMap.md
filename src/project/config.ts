@@ -22,6 +22,11 @@ export interface Project {
   /** Name shown in the browser header. */
   projectName: string;
   port: number;
+  /**
+   * Workflow statuses in board order, from `backlog.config.yml`. Empty when the
+   * project declares none; the board then uses Backlog.md's defaults.
+   */
+  statuses: string[];
   storymapConfigPath?: string;
   backlogConfigPath?: string;
   /** Nearest enclosing Git repository, when the project is inside one. */
@@ -146,6 +151,9 @@ export function loadProject(discovery: Discovery): Project {
     storyMapsDirectory,
     projectName: str(storymapDoc.projectName) ?? str(backlogDoc.project_name) ?? basename(root),
     port: typeof rawPort === 'number' ? rawPort : DEFAULT_PORT,
+    statuses: Array.isArray(backlogDoc.statuses)
+      ? backlogDoc.statuses.filter((s): s is string => typeof s === 'string' && s.trim() !== '').map((s) => s.trim())
+      : [],
     ...(discovery.storymapConfigPath ? { storymapConfigPath: discovery.storymapConfigPath } : {}),
     ...(discovery.backlogConfigPath ? { backlogConfigPath: discovery.backlogConfigPath } : {}),
     ...(discovery.gitRoot ? { gitRoot: discovery.gitRoot } : {}),

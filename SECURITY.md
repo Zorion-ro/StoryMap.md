@@ -37,6 +37,10 @@ StoryMap.md is a local developer tool. It:
   is expected behaviour, not a vulnerability;
 - serves only its own packaged CSS and JavaScript from disk, never arbitrary
   repository files;
+- writes work items and map files only through `POST /api/stories/bulk`, which
+  accepts a request only when it is `application/json`, carries no foreign
+  `Origin`, and names a loopback address or the `--host` address in its `Host`
+  header;
 - makes no network calls, stores no credentials and sends no telemetry.
 
 Things we would very much like to hear about: path traversal out of the

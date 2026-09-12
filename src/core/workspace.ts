@@ -160,6 +160,18 @@ export class WorkspaceHost {
     return this.current;
   }
 
+  /**
+   * Reloads now, whatever the fingerprint says. Called after this process writes:
+   * a rewrite of the same size inside the same millisecond would otherwise look
+   * unchanged.
+   */
+  refresh(): Workspace {
+    this.current = Workspace.load(this.repoRoot, this.backlogDirectory, new Date(), this.storyMapsDirectory);
+    this.stamp = fingerprint(this.repoRoot, this.backlogDirectory, this.storyMapsDirectory);
+    this.version += 1;
+    return this.current;
+  }
+
   /** Increments whenever a reload happened; the UI polls this to auto-refresh. */
   get revision(): number {
     return this.version;

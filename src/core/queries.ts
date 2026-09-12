@@ -2,7 +2,13 @@ import type { WorkItem } from './types';
 import type { Workspace } from './workspace';
 import { primaryIds, supportingIds } from './resolver';
 import { normalizeId } from './work-item-index';
+import { FILTER_FIELDS, matchesStoryQuery } from './story-query';
+import type { StoryQuery } from './story-query';
 
+/**
+ * The original one-value-per-field filter, kept for library callers. It is a
+ * shorthand for a {@link StoryQuery} in which every field is `IN [value]`.
+ */
 export interface StoryFilter {
   text?: string;
   status?: string;
@@ -10,50 +16,41 @@ export interface StoryFilter {
   state?: string;
   area?: string;
   owner?: string;
+  /** A `priority:` label value, or one of Backlog.md's high | medium | low. */
   priority?: string;
   wstatus?: string;
   wtype?: string;
   /** Map id, or the literal 'none' for stories no map places. */
   map?: string;
-  /** Milestone id or title, or the literal 'none' for unassigned stories. */
+  /** Milestone id, or the literal 'none' for unassigned stories. */
   milestone?: string;
 }
 
-export function matches(item: WorkItem, filter: StoryFilter, mapMembership?: Map<string, Set<string>>): boolean {
-  if (filter.state === 'active' && item.completed) return false;
-  if (filter.state === 'completed' && !item.completed) return false;
-  if (filter.status && item.status !== filter.status) return false;
-  if (filter.area && item.area !== filter.area) return false;
-  if (filter.owner && item.owner !== filter.owner) return false;
-  if (filter.priority && item.priority !== filter.priority) return false;
-  if (filter.wstatus && item.wstatus !== filter.wstatus) return false;
-  if (filter.wtype && item.wtype !== filter.wtype) return false;
-  if (filter.milestone) {
-    if (filter.milestone === 'none') {
-      if (item.milestone) return false;
-    } else if (item.milestone !== filter.milestone) {
-      return false;
-    }
+export function storyFilterToQuery(filter: StoryFilter): StoryQuery {
+  const query: StoryQuery = { fields: {} };
+  if (filter.text) query.text = filter.text;
+  for (const field of FILTER_FIELDS) {
+    const value = filter[field];
+    if (value) query.fields[field] = { op: 'in', values: [value] };
   }
-  if (filter.map && mapMembership) {
-    const maps = mapMembership.get(normalizeId(item.id));
-    if (filter.map === 'none') {
-      if (maps && maps.size > 0) return false;
-    } else if (!maps || !maps.has(filter.map)) {
-      return false;
-    }
-  }
-  if (filter.text) {
-    const needle = filter.text.toLowerCase();
-    const haystack = `${item.id}\n${item.title}\n${item.labels.join(' ')}\n${item.body}`.toLowerCase();
-    if (!haystack.includes(needle)) return false;
-  }
-  return true;
+  return query;
+}
+
+function isStoryQuery(filter: StoryFilter | StoryQuery): filter is StoryQuery {
+  return typeof (filter as StoryQuery).fields === 'object';
+}
+
+export function matches(
+  item: WorkItem,
+  filter: StoryFilter | StoryQuery,
+  mapMembership?: Map<string, Set<string>>,
+): boolean {
+  return matchesStoryQuery(item, isStoryQuery(filter) ? filter : storyFilterToQuery(filter), mapMembership);
 }
 
 export function filterStories(
   workspace: Workspace,
-  filter: StoryFilter,
+  filter: StoryFilter | StoryQuery,
   mapMembership?: Map<string, Set<string>>,
 ): WorkItem[] {
   return workspace.index.items.filter((item) => matches(item, filter, mapMembership));
@@ -120,7 +117,8 @@ export function facets(items: readonly WorkItem[]): Facets {
     status: facet(items, (i) => i.status),
     area: facet(items, (i) => i.area),
     owner: facet(items, (i) => i.owner),
-    priority: facet(items, (i) => i.priority),
+    // The `priority:` label scale, which is what the `priority` filter selects.
+    priority: facet(items, (i) => i.priorityLabel),
     wstatus: facet(items, (i) => i.wstatus),
     wtype: facet(items, (i) => i.wtype),
   };

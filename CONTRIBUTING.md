@@ -39,8 +39,11 @@ Concretely, please do not introduce:
   cache that has to be invalidated to stay correct;
 - **a hosted service dependency** — no accounts, no sync, no telemetry, no
   update check. The tool makes no network calls at all;
-- **writes to work items.** StoryMap.md reads Backlog.md files and never edits
-  them. `storymap init` writing `storymap.config.yml` is the single exception;
+- **a second write path.** Every edit to a work item or a map file goes through
+  `src/core/story-edit.ts`: validate the whole request, compute minimal line
+  edits, re-parse and verify them, then commit all-or-nothing with a conflict
+  check. The Stories bulk edit and the Kanban board both use it. Apart from
+  that, `storymap init` writing `storymap.config.yml` is the only write;
 - **assumptions from one product.** No hard-coded directory layout, id prefix,
   label vocabulary or workflow. Every one of those is a project's own choice, and
   a project that uses none of the optional `wtype:` / `wstatus:` / `area:` labels
