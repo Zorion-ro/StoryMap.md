@@ -37,9 +37,14 @@ StoryMap.md is a local developer tool. It:
   is expected behaviour, not a vulnerability;
 - serves only its own packaged CSS and JavaScript from disk, never arbitrary
   repository files;
-- makes no network calls, stores no credentials and sends no telemetry.
+- makes no network calls, stores no credentials and sends no telemetry;
+- can change work items through its JSON API. Without `--api-token` that API
+  answers only requests addressed to a loopback host name, refuses cross-origin
+  requests and non-JSON mutations, and refuses writes when bound beyond
+  loopback.
 
 Things we would very much like to hear about: path traversal out of the
 configured project directories, any route that serves a file outside the
-packaged assets, HTML injection from work-item or map content, and anything that
+packaged assets, HTML injection from work-item or map content, a way to make the JSON API write
+from a web page or a non-loopback client without the token, and anything that
 lets a crafted repository run code when it is merely read.

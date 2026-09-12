@@ -8,6 +8,7 @@ import { runInit } from './commands/init';
 import { runBrowser } from './commands/browser';
 import { runValidate } from './commands/validate';
 import { runDoctor } from './commands/doctor';
+import { API_VALUE_FLAGS, runApiCommand } from './commands/api';
 
 /**
  * The `storymap` executable.
@@ -35,6 +36,15 @@ Commands
   validate    check work items and story maps; exits non-zero on errors
   doctor      diagnose this project and this environment
 
+Story commands (the machine API, without a server; see docs/storymap-api.md)
+  meta                     fields, valid values, limits and error codes
+  list                     filter, sort and page stories
+  get <id>                 one story
+  create                   create a story; the id is allocated
+  update <id>              change some fields of one story
+  bulk-update <id>...      change the same fields on many stories, all or nothing
+  openapi                  the OpenAPI document
+
 Options
   --project <dir>   act on this directory instead of searching upward
   -h, --help        show this help
@@ -45,6 +55,28 @@ Browser options
   --port <number>   listen on this port (default 6480, or browser.port in config)
   --host <address>  bind address (default 127.0.0.1; local-only by design)
   --no-open         do not open a web browser
+  --read-only       refuse every mutation through the JSON API
+  --api-token <t>   require Authorization: Bearer <t> on the JSON API
+                    (or set STORYMAP_API_TOKEN); needed to write beyond loopback
+
+Story command options
+  --json                    print exactly one JSON document on stdout
+  --status Backlog,Ready    include (any filterable field: --owner, --wtype, --map ...)
+  --status-not Done         exclude; "none" means no value
+  --text <s>  --sort <field>  --order asc|desc  --limit <n>  --cursor <c>  --all
+  --<field> <value>         set a field (--status, --owner, --priority, --milestone ...)
+  --clear <field>           set a nullable field to null
+  --add-label / --remove-label / --labels a,b
+  --add-dependency / --remove-dependency
+  --body-file <path|->      read the body from a file or stdin
+  --data <json|@file|->     send the exact JSON request body instead of field options
+  --expected-revision <r>   refuse to overwrite a newer edit (exit 5)
+  --dry-run                 validate and report; write nothing
+  --allow-new-values        accept a value not yet used for an open field
+
+Exit codes
+  0 success · 1 unexpected · 2 usage or malformed request · 3 not found
+  4 validation failed · 5 revision conflict
 
 Init options
   --force              overwrite an existing storymap.config.yml
@@ -58,24 +90,32 @@ Files
 
 export interface Args {
   command?: string;
+  /** Last value of each option. */
   flags: Map<string, string | boolean>;
+  /** Every value of each option, for options that may repeat. */
+  lists?: Map<string, (string | boolean)[]>;
   positional: string[];
 }
 
 /** A tiny long-option parser: `--flag`, `--no-flag`, `--key value`, `--key=value`. */
 export function parseArgs(argv: readonly string[]): Args {
   const flags = new Map<string, string | boolean>();
+  const lists = new Map<string, (string | boolean)[]>();
   const positional: string[] = [];
-  const takesValue = new Set(['project', 'port', 'host', 'maps-dir', 'backlog-dir']);
+  const takesValue = new Set(['project', 'port', 'host', 'maps-dir', 'backlog-dir', 'api-token', ...API_VALUE_FLAGS]);
+  const set = (name: string, value: string | boolean) => {
+    flags.set(name, value);
+    lists.set(name, [...(lists.get(name) ?? []), value]);
+  };
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '-h') {
-      flags.set('help', true);
+      set('help', true);
       continue;
     }
     if (token === '-v') {
-      flags.set('version', true);
+      set('version', true);
       continue;
     }
     if (!token.startsWith('--')) {
@@ -85,11 +125,11 @@ export function parseArgs(argv: readonly string[]): Args {
     const body = token.slice(2);
     const eq = body.indexOf('=');
     if (eq !== -1) {
-      flags.set(body.slice(0, eq), body.slice(eq + 1));
+      set(body.slice(0, eq), body.slice(eq + 1));
       continue;
     }
     if (body.startsWith('no-')) {
-      flags.set(body.slice(3), false);
+      set(body.slice(3), false);
       continue;
     }
     if (takesValue.has(body)) {
@@ -97,13 +137,13 @@ export function parseArgs(argv: readonly string[]): Args {
       if (next === undefined || next.startsWith('--')) {
         throw new UsageError(`--${body} needs a value`);
       }
-      flags.set(body, next);
+      set(body, next);
       i += 1;
       continue;
     }
-    flags.set(body, true);
+    set(body, true);
   }
-  return { command: positional[0], flags, positional: positional.slice(1) };
+  return { command: positional[0], flags, lists, positional: positional.slice(1) };
 }
 
 export class UsageError extends Error {}
@@ -170,6 +210,14 @@ export async function main(argv: readonly string[], cwd = process.cwd()): Promis
         return await runValidate(args, cwd);
       case 'doctor':
         return await runDoctor(args, cwd);
+      case 'list':
+      case 'get':
+      case 'create':
+      case 'update':
+      case 'bulk-update':
+      case 'meta':
+      case 'openapi':
+        return await runApiCommand(args, cwd);
       default:
         process.stderr.write(`unknown command "${args.command}"\n\n${USAGE}`);
         return 2;

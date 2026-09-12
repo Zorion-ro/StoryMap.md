@@ -39,8 +39,10 @@ Concretely, please do not introduce:
   cache that has to be invalidated to stay correct;
 - **a hosted service dependency** — no accounts, no sync, no telemetry, no
   update check. The tool makes no network calls at all;
-- **writes to work items.** StoryMap.md reads Backlog.md files and never edits
-  them. `storymap init` writing `storymap.config.yml` is the single exception;
+- **a second write path for work items.** Every change to a work item goes
+  through `StoryService` (`src/api/story-service.ts`) and the minimal-edit writer
+  (`src/core/work-item-writer.ts`), whichever surface asks for it — HTTP, CLI or
+  browser. Rules live there once;
 - **assumptions from one product.** No hard-coded directory layout, id prefix,
   label vocabulary or workflow. Every one of those is a project's own choice, and
   a project that uses none of the optional `wtype:` / `wstatus:` / `area:` labels
@@ -51,9 +53,10 @@ Concretely, please do not introduce:
 ```text
 src/
 ├── cli.ts            the `storymap` executable (the shebang lives here)
-├── commands/         init · browser · validate · doctor
+├── commands/         init · browser · validate · doctor · story commands (api.ts)
 ├── project/          discovery and storymap.config.yml
 ├── core/             reader · index · map parser · resolver · validator
+├── api/              the story API: field table, validation, service, HTTP, OpenAPI
 ├── server.ts         Express routes
 ├── render/           server-rendered HTML — no bundler, no framework
 └── static/           app.css, app.js — the only files served from disk
