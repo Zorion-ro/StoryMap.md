@@ -7,3 +7,4 @@ export * from './validator';
 export * from './workspace';
 export * from './queries';
 export * from './visual-model';
+export * from './workflow';

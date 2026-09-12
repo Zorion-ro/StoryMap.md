@@ -62,7 +62,7 @@ export function createApp(project: Project) {
         return {
           id: m.id,
           title: m.title,
-          done: inIt.filter((i) => i.status === 'Done' || i.completed).length,
+          done: inIt.filter((i) => project.workflow.isDone(i.status) || i.completed).length,
           total: inIt.length,
         };
       })
@@ -274,7 +274,7 @@ export function createApp(project: Project) {
       wstatus: query.wstatus,
       milestone: query.milestone,
       laneMode,
-    });
+    }, project.workflow);
     const onMap = new Set(resolved.referencedIds.map(normalizeId));
     const mapItems = ws.index.items.filter((i) => onMap.has(normalizeId(i.id)));
     const f = facets(mapItems);

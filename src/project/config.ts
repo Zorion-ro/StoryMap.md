@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { DEFAULT_BACKLOG_DIRECTORY } from '../core';
+import { DEFAULT_BACKLOG_DIRECTORY, WorkflowError, resolveWorkflow } from '../core';
+import type { Workflow } from '../core';
 import { BACKLOG_CONFIG_FILE, STORYMAP_CONFIG_FILE } from './discover';
 import type { Discovery } from './discover';
 
@@ -32,6 +33,14 @@ export interface Project {
    * a project that says nothing keeps the directory-only behaviour.
    */
   completedStatuses: string[];
+  /**
+   * The project's workflow: its statuses from `backlog.config.yml`
+   * (`statuses`, `default_status`) and, optionally, how they are laned from
+   * `storymap.config.yml` (`workflow.laneOrder`, `workflow.doneStatuses`,
+   * `workflow.activeStatuses`). Every status question the views ask is
+   * answered from this, never from a status literal.
+   */
+  workflow: Workflow;
   storymapConfigPath?: string;
   backlogConfigPath?: string;
   /** Nearest enclosing Git repository, when the project is inside one. */
@@ -158,6 +167,35 @@ export function loadProject(discovery: Discovery): Project {
   }
   const completedStatuses = strList(rawCompleted);
 
+  const workflowSection = section(storymapDoc, 'workflow');
+  const list = (doc: Record<string, unknown>, field: string, name: string, file?: string): string[] | undefined => {
+    const value = doc[field];
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value)) {
+      throw new ConfigError(`\`${name}\` must be a list of status names, got ${JSON.stringify(value)}`, file);
+    }
+    return value.map((v) => (typeof v === 'string' ? v : String(v)));
+  };
+  const backlogWhere = discovery.backlogConfigPath;
+  let workflow: Workflow;
+  try {
+    workflow = resolveWorkflow({
+      statuses: list(backlogDoc, 'statuses', 'statuses', backlogWhere),
+      defaultStatus: str(backlogDoc.default_status),
+      laneOrder: list(workflowSection, 'laneOrder', 'workflow.laneOrder', where),
+      doneStatuses: list(workflowSection, 'doneStatuses', 'workflow.doneStatuses', where),
+      activeStatuses: list(workflowSection, 'activeStatuses', 'workflow.activeStatuses', where),
+      completedStatuses,
+    });
+  } catch (error) {
+    if (error instanceof WorkflowError) {
+      // Name the file the offending setting lives in: the vocabulary is Backlog.md's, the laning is ours.
+      const inBacklogConfig = /^`statuses`|default status/.test(error.message);
+      throw new ConfigError(error.message, inBacklogConfig ? backlogWhere : (where ?? backlogWhere));
+    }
+    throw error;
+  }
+
   const rawPort = browserSection.port;
   if (rawPort !== undefined && (typeof rawPort !== 'number' || !Number.isInteger(rawPort) || rawPort < 1 || rawPort > 65535)) {
     throw new ConfigError(`\`browser.port\` must be an integer between 1 and 65535, got ${JSON.stringify(rawPort)}`, where);
@@ -170,6 +208,7 @@ export function loadProject(discovery: Discovery): Project {
     projectName: str(storymapDoc.projectName) ?? str(backlogDoc.project_name) ?? basename(root),
     port: typeof rawPort === 'number' ? rawPort : DEFAULT_PORT,
     completedStatuses,
+    workflow,
     ...(discovery.storymapConfigPath ? { storymapConfigPath: discovery.storymapConfigPath } : {}),
     ...(discovery.backlogConfigPath ? { backlogConfigPath: discovery.backlogConfigPath } : {}),
     ...(discovery.gitRoot ? { gitRoot: discovery.gitRoot } : {}),
