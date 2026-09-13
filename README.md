@@ -10,7 +10,8 @@ page, and a spatial story-map wall with activities across the top and release or
 workflow lanes down the side.
 
 There is no database, no account and no server to deploy. Your files are the
-truth; the tool is a reader.
+truth. Coding agents and scripts can query and change the same work items
+through a JSON API and CLI — see [docs/storymap-api.md](./docs/storymap-api.md).
 
 ```text
 Markdown work items
@@ -234,10 +235,13 @@ A story placed in a cell appears as a card there.
 
 ## Backlog.md compatibility
 
-Backlog.md Markdown remains the canonical work-item data. StoryMap.md reads it
-and never writes it: no command edits a work item, renames a file or touches
-`backlog.config.yml`. The only file StoryMap.md writes is its own
-`storymap.config.yml`, and only when you run `init`.
+Backlog.md Markdown remains the canonical work-item data. The browser only
+reads it. Work items are written only when you ask through the
+[story API or CLI](./docs/storymap-api.md) (`update`, `bulk-update`, `create`),
+and then as the smallest edit that expresses the change, in Backlog.md's own
+layout: only the changed front-matter keys and `updated_date`, verified by
+re-reading before the file is replaced. Nothing renames a work-item file or
+touches `backlog.config.yml`; `init` writes `storymap.config.yml`.
 
 Compatibility is a matter of file format. StoryMap.md is **not affiliated with,
 endorsed by, or maintained by the Backlog.md project**, and contains none of its
@@ -273,7 +277,9 @@ map has to show delivered work in its journey position.
 
 - binds `127.0.0.1` unless you override it
 - serves its own packaged CSS and JS, and nothing else from your disk
-- writes nothing except `storymap.config.yml`, and only when you run `init`
+- writes `storymap.config.yml` on `init`, and work items only through the story
+  API or CLI; the JSON API answers loopback requests only unless started with
+  `--api-token`, and `--read-only` disables its writes
 - no telemetry, no update check, no network calls at all
 
 ## Develop
@@ -283,7 +289,7 @@ git clone https://github.com/Zorion-ro/StoryMap.md.git
 cd StoryMap.md
 
 npm ci
-npm test          # 205 tests
+npm test
 npm run typecheck
 npm run build
 npm pack

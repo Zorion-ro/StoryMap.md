@@ -90,7 +90,12 @@ export async function runBrowser(args: Args, cwd: string): Promise<number> {
   const host = typeof args.flags.get('host') === 'string' ? String(args.flags.get('host')) : DEFAULT_HOST;
   const shouldOpen = args.flags.get('open') !== false;
 
-  const { app, host: workspaceHost } = createApp(project);
+  const tokenFlag = args.flags.get('api-token');
+  if (tokenFlag !== undefined && typeof tokenFlag !== 'string') throw new UsageError('--api-token needs a value');
+  const token = tokenFlag ?? (process.env.STORYMAP_API_TOKEN?.trim() || undefined);
+  const readOnly = args.flags.get('read-only') === true;
+
+  const { app, host: workspaceHost } = createApp(project, { bindHost: host, token, readOnly });
   const ws = workspaceHost.get();
   const httpServer = createServer(app);
   await listen(httpServer, chosenPort, host);
@@ -110,6 +115,8 @@ export async function runBrowser(args: Args, cwd: string): Promise<number> {
       '',
       '  Listening on:',
       `  ${url}`,
+      '',
+      `  JSON API     ${url}/api/v1/storymap${readOnly ? '  (read-only)' : ''}${token ? '  (bearer token required)' : ''}`,
       '',
       '  Files on disk are canonical; edits are picked up automatically.',
       '  Press Ctrl+C to stop.',

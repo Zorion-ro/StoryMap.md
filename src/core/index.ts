@@ -6,5 +6,8 @@ export * from './resolver';
 export * from './validator';
 export * from './workspace';
 export * from './queries';
+export * from './story-query';
 export * from './visual-model';
 export * from './workflow';
+export * from './backlog-conventions';
+export * from './work-item-writer';

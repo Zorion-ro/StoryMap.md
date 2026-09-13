@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -118,6 +119,16 @@ function plainBody(rest: string): string {
 }
 
 /**
+/**
+ * A fingerprint of a file's exact bytes. Two reads with the same revision saw
+ * the same content, so a writer that names the revision it read can detect that
+ * someone else changed the file in between.
+ */
+export function contentRevision(raw: string): string {
+  return createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 20);
+}
+
+/**
  * `archived` is the directory signal: the file lives in `completed/`.
  * `completedStatuses` adds the workflow signal, for projects whose delivered
  * work stays in `tasks/` and is marked by a terminal status instead. An item is
@@ -185,6 +196,7 @@ export function parseWorkItem(
     completed: archived || completedStatuses.includes(status),
     createdDate: typeof front.created_date === 'string' ? front.created_date : undefined,
     updatedDate: typeof front.updated_date === 'string' ? front.updated_date : undefined,
+    revision: contentRevision(raw),
     area: found.area,
     owner: found.owner,
     wtype: found.wtype,
@@ -196,12 +208,20 @@ export function parseWorkItem(
   return { item, problems };
 }
 
+/**
+ * Parsed files keyed by absolute path, reused while a file's size, mtime and
+ * inode are unchanged — the same evidence the workspace fingerprint trusts.
+ * It only saves re-parsing; the files stay the truth.
+ */
+export type ParseCache = Map<string, { stamp: string; result: ReturnType<typeof parseWorkItem> }>;
+
 function readDir(
   dir: string,
   repoRoot: string,
   archived: boolean,
   out: BacklogReadResult,
   completedStatuses: readonly string[],
+  cache?: { previous: ParseCache; next: ParseCache },
 ): void {
   let entries: string[];
   try {
@@ -212,11 +232,21 @@ function readDir(
   for (const name of entries.sort()) {
     if (!name.endsWith('.md')) continue;
     const full = join(dir, name);
-    if (!statSync(full).isFile()) continue;
+    let stat;
+    try {
+      stat = statSync(full);
+    } catch {
+      continue; // raced with a concurrent rename; the next read settles it
+    }
+    if (!stat.isFile()) continue;
     const rel = relative(repoRoot, full);
-    const { item, problems } = parseWorkItem(readFileSync(full, 'utf8'), rel, archived, completedStatuses);
-    out.problems.push(...problems);
-    if (item) out.items.push(item);
+    const stamp = `${archived}:${completedStatuses.join('|')}:${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+    const hit = cache?.previous.get(full);
+    const parsed =
+      hit && hit.stamp === stamp ? hit.result : parseWorkItem(readFileSync(full, 'utf8'), rel, archived, completedStatuses);
+    cache?.next.set(full, { stamp, result: parsed });
+    out.problems.push(...parsed.problems);
+    if (parsed.item) out.items.push(parsed.item);
   }
 }
 
@@ -301,10 +331,13 @@ export function readMilestones(paths: BacklogPaths): Milestone[] {
 }
 
 /** Reads `tasks/` and `completed/`. Problems are collected, never thrown. */
-export function readBacklog(paths: BacklogPaths): BacklogReadResult {
+export function readBacklog(paths: BacklogPaths, cache?: ParseCache): BacklogReadResult {
   const result: BacklogReadResult = { items: [], problems: [] };
   const completedStatuses = paths.completedStatuses ?? [];
-  readDir(join(paths.backlogDir, 'tasks'), paths.repoRoot, false, result, completedStatuses);
-  readDir(join(paths.backlogDir, 'completed'), paths.repoRoot, true, result, completedStatuses);
+  // Parse into a fresh generation so files that disappeared fall out of the cache.
+  const generation = cache && { previous: new Map(cache), next: cache };
+  cache?.clear();
+  readDir(join(paths.backlogDir, 'tasks'), paths.repoRoot, false, result, completedStatuses, generation);
+  readDir(join(paths.backlogDir, 'completed'), paths.repoRoot, true, result, completedStatuses, generation);
   return result;
 }

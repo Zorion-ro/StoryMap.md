@@ -26,6 +26,8 @@ import { computeCoverage } from './coverage';
 import type { NavMap } from './render/layout';
 import { esc } from './render/html';
 import type { Project } from './project/config';
+import { API_BASE, StoryService, createApiRouter } from './api';
+import type { ApiAccess } from './api';
 
 /**
  * Packaged browser assets, resolved against this module rather than the
@@ -40,10 +42,13 @@ function str(value: unknown): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-export function createApp(project: Project) {
+export function createApp(project: Project, access: ApiAccess = {}) {
   const host = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory, project.completedStatuses);
+  // One host for pages and API: a change made through either is what the other reads next.
+  const stories = new StoryService(project, { host });
   const app = express();
   app.disable('x-powered-by');
+  app.use(API_BASE, createApiRouter(stories, access));
 
   /** Everything the persistent side panel needs, rebuilt per request. */
   const shell = (ws: ReturnType<WorkspaceHost['get']>) => ({
@@ -353,7 +358,7 @@ export function createApp(project: Project) {
     );
   });
 
-  return { app, host };
+  return { app, host, stories };
 }
 
 function countsBadge(active: number, completed: number): string {

@@ -6,6 +6,7 @@
  * scripts without shelling out.
  */
 export * from './core';
+export * from './api';
 export { createApp, compareStories } from './server';
 export { computeCoverage, groupBy } from './coverage';
 export type { Bucket, BucketKey, Coverage } from './coverage';

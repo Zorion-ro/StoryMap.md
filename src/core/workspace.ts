@@ -1,10 +1,11 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readBacklog, readMilestones, resolveBacklogPaths } from './backlog-reader';
-import type { BacklogPaths } from './backlog-reader';
+import type { BacklogPaths, ParseCache } from './backlog-reader';
 import { readStoryMaps } from './story-map-reader';
 import type { StoryMapReadResult } from './story-map-reader';
-import { resolveStoryMap } from './resolver';
+import { primaryIds, resolveStoryMap, supportingIds } from './resolver';
+import { normalizeId } from './work-item-index';
 import { WorkItemIndex } from './work-item-index';
 import type { BacklogReadResult, Milestone, ResolvedStoryMap, StoryMap } from './types';
 
@@ -24,6 +25,7 @@ export class Workspace {
   readonly milestones: Milestone[];
   readonly loadedAt: Date;
   private readonly resolved = new Map<string, ResolvedStoryMap>();
+  private placementsMemo?: Map<string, { mapId: string; role: 'primary' | 'supporting' }[]>;
 
   private constructor(
     readonly paths: BacklogPaths,
@@ -61,9 +63,34 @@ export class Workspace {
     now = new Date(),
     storyMapsDirectory?: string,
     completedStatuses: readonly string[] = [],
+    cache?: ParseCache,
   ): Workspace {
     const paths = resolveBacklogPaths(repoRoot, backlogDirectory, storyMapsDirectory, completedStatuses);
-    return new Workspace(paths, readBacklog(paths), readStoryMaps(paths), readMilestones(paths), now);
+    return new Workspace(paths, readBacklog(paths, cache), readStoryMaps(paths), readMilestones(paths), now);
+  }
+
+  /**
+   * `normalizedStoryId -> the maps that place it`, in map order, primary before
+   * supporting. Computed once per workspace, which is rebuilt whenever a file
+   * changes, so repeated queries never rescan every map.
+   */
+  get placements(): Map<string, { mapId: string; role: 'primary' | 'supporting' }[]> {
+    if (this.placementsMemo) return this.placementsMemo;
+    const out = new Map<string, { mapId: string; role: 'primary' | 'supporting' }[]>();
+    const add = (id: string, mapId: string, role: 'primary' | 'supporting') => {
+      const key = normalizeId(id);
+      const list = out.get(key) ?? [];
+      if (!list.some((p) => p.mapId === mapId && p.role === role)) list.push({ mapId, role });
+      out.set(key, list);
+    };
+    for (const map of this.maps) {
+      for (const id of primaryIds(map)) add(id, map.id, 'primary');
+    }
+    for (const map of this.maps) {
+      for (const id of supportingIds(map)) add(id, map.id, 'supporting');
+    }
+    this.placementsMemo = out;
+    return out;
   }
 
   /** Milestone title for an id, or the id itself when nothing declares it. */
@@ -140,6 +167,7 @@ export class WorkspaceHost {
   private current: Workspace;
   private stamp: string;
   private version = 0;
+  private readonly cache: ParseCache = new Map();
 
   constructor(
     readonly repoRoot: string,
@@ -147,7 +175,7 @@ export class WorkspaceHost {
     readonly storyMapsDirectory?: string,
     readonly completedStatuses: readonly string[] = [],
   ) {
-    this.current = Workspace.load(repoRoot, backlogDirectory, new Date(), storyMapsDirectory, completedStatuses);
+    this.current = Workspace.load(repoRoot, backlogDirectory, new Date(), storyMapsDirectory, completedStatuses, this.cache);
     this.stamp = fingerprint(repoRoot, backlogDirectory, storyMapsDirectory);
   }
 
@@ -161,11 +189,21 @@ export class WorkspaceHost {
         new Date(),
         this.storyMapsDirectory,
         this.completedStatuses,
+        this.cache,
       );
       this.stamp = next;
       this.version += 1;
     }
     return this.current;
+  }
+
+  /**
+   * Forces the next `get()` to reload. A writer calls this after changing a
+   * file, so its own edit is visible at once even when the change kept the
+   * file's size and landed inside the same millisecond as the previous one.
+   */
+  invalidate(): void {
+    this.stamp = '';
   }
 
   /** Increments whenever a reload happened; the UI polls this to auto-refresh. */
