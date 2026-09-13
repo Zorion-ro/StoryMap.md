@@ -10,8 +10,9 @@ page, and a spatial story-map wall with activities across the top and release or
 workflow lanes down the side.
 
 There is no database, no account and no server to deploy. Your files are the
-truth. Coding agents and scripts can query and change the same work items
-through a JSON API and CLI — see [docs/storymap-api.md](./docs/storymap-api.md).
+truth; the tool reads them, and writes back only the edits you apply. Coding
+agents and scripts can query and change the same work items through a JSON API
+and CLI — see [docs/storymap-api.md](./docs/storymap-api.md).
 
 ```text
 Markdown work items
@@ -90,6 +91,47 @@ storymap browser --host 127.0.0.1
 The default bind address is `127.0.0.1` and it stays that way: the server reads
 your working files and applies no authentication. If the port is busy the
 command fails and says so rather than attaching to whatever is there.
+
+#### Stories: filters, bulk edit and Kanban
+
+The Stories page filters every categorical field (`state`, `status`, `wstatus`,
+`area`, `owner`, `priority`, `wtype`, `map`, `milestone`) with **is** or
+**is not** and any number of values. Values inside one field are ORed, different
+fields are ANDed, **is not** means NOT IN, and `none` means "no value":
+
+```text
+/?status=Backlog&status=Ready                    status IS Backlog OR Ready
+/?status=Done&status=Cancelled&status.op=not     status NOT IN [Done, Cancelled]
+/?wtype=defect&wtype=feature&owner=platform      ... AND owner IS platform
+/?map=none                                       on no story map
+```
+
+Every filter is in the URL, so it bookmarks, survives a reload and works with
+back and forward. Single-value URLs from earlier versions mean what they meant.
+`priority` is the `priority:` label scale; Backlog.md's own `high`, `medium`
+and `low` still match the native field.
+
+`?view=kanban` shows the same filtered stories as a board grouped the way the
+Backlog.md board groups them: one column per status in `backlog.config.yml`,
+optional milestone lanes (`&lanes=milestone`), and cards ordered by `ordinal`,
+then creation date. A status the config does not declare gets its own
+read-only column rather than disappearing.
+
+Select stories (click, Shift-click for a range, **Select all shown**, or
+Ctrl/Cmd-click on the board) to edit `status`, `wstatus`, `area`, `owner`,
+`priority`, `wtype`, `map` and `milestone` together. Fields left on
+**No change** are not touched; **Clear** removes a label, the milestone, or the
+story from every map. The review step says how many stories will change and to
+what before anything is written. Dragging a card to another column changes its
+status; dragging one of several selected cards moves them all, after the same
+review.
+
+Edits are the only writes the browser makes, and they are deliberately narrow:
+the whole request is validated first (statuses from `backlog.config.yml`,
+declared milestones, existing map cells), each file gets a minimal line edit
+that is re-parsed and checked before it is written, a file changed on disk since
+the review is a conflict, and a request is all-or-nothing. `map` changes edit the
+map YAML, never the story.
 
 ### `storymap validate`
 
@@ -235,11 +277,12 @@ A story placed in a cell appears as a card there.
 
 ## Backlog.md compatibility
 
-Backlog.md Markdown remains the canonical work-item data. The browser only
-reads it. Work items are written only when you ask through the
-[story API or CLI](./docs/storymap-api.md) (`update`, `bulk-update`, `create`),
-and then as the smallest edit that expresses the change, in Backlog.md's own
-layout: only the changed front-matter keys and `updated_date`, verified by
+Backlog.md Markdown remains the canonical work-item data. StoryMap.md changes it
+only when you ask: through the [story API or CLI](./docs/storymap-api.md)
+(`update`, `bulk-update`, `create`), or by applying a bulk edit or moving a card
+on the Stories board. Either way the change is the smallest edit that expresses
+it, in Backlog.md's own layout: only the changed front-matter keys and
+`updated_date` (in Backlog.md's UTC `YYYY-MM-DD HH:MM` form), verified by
 re-reading before the file is replaced. Nothing renames a work-item file or
 touches `backlog.config.yml`; `init` writes `storymap.config.yml`.
 
@@ -278,8 +321,11 @@ map has to show delivered work in its journey position.
 - binds `127.0.0.1` unless you override it
 - serves its own packaged CSS and JS, and nothing else from your disk
 - writes `storymap.config.yml` on `init`, and work items only through the story
-  API or CLI; the JSON API answers loopback requests only unless started with
-  `--api-token`, and `--read-only` disables its writes
+  API or CLI or when you apply an edit in the browser; `--read-only` disables
+  both kinds of write
+- the JSON API answers loopback requests only unless started with
+  `--api-token`; a browser edit is accepted only as a same-origin JSON request
+  to the address the server was started on
 - no telemetry, no update check, no network calls at all
 
 ## Develop

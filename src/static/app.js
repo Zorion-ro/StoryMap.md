@@ -28,7 +28,8 @@
   if (reveal) reveal.addEventListener('click', function () { setSidebar(false); });
 
   // ---- filters submit on change, so a select is one click not two ----------
-  var form = document.querySelector('form.filters');
+  // The Stories filter bar stages several choices before one Apply; stories.js owns it.
+  var form = document.querySelector('form.filters:not([data-story-filters])');
   if (form) {
     form.querySelectorAll('select, input[type="checkbox"]').forEach(function (el) {
       el.addEventListener('change', function () { form.submit(); });
@@ -55,7 +56,8 @@
   // ---- whole table row is clickable ---------------------------------------
   document.querySelectorAll('tr.row[data-href]').forEach(function (row) {
     row.addEventListener('click', function (event) {
-      if (event.target.closest('a')) return;
+      if (event.target.closest('a, input, label, .c-sel')) return;
+      if (event.ctrlKey || event.metaKey || event.shiftKey) return;
       window.location.href = row.getAttribute('data-href');
     });
   });

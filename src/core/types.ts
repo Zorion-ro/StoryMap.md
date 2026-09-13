@@ -2,8 +2,9 @@
  * Domain types for the story-map tool.
  *
  * The Backlog.md Markdown files are canonical. Everything here is a read model
- * built from them; the only code that writes a work-item file is
- * `work-item-writer.ts`, driven by the story service.
+ * built from them. Work-item files are written only through the story service
+ * (`work-item-writer.ts`) and the browser's bulk/Kanban edits (`story-edit.ts`),
+ * each of which edits minimally and verifies before writing.
  */
 
 /** A checkbox line inside a Backlog.md `AC:` or `DOD:` marker block. */

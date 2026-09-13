@@ -7,6 +7,9 @@
  */
 export * from './core';
 export * from './api';
+// Both layers name their change record `FieldChange`; the core one keeps the name.
+export type { FieldChange } from './core';
+export type { FieldChange as StoryFieldChange } from './api';
 export { createApp, compareStories } from './server';
 export { computeCoverage, groupBy } from './coverage';
 export type { Bucket, BucketKey, Coverage } from './coverage';

@@ -39,10 +39,13 @@ Concretely, please do not introduce:
   cache that has to be invalidated to stay correct;
 - **a hosted service dependency** — no accounts, no sync, no telemetry, no
   update check. The tool makes no network calls at all;
-- **a second write path for work items.** Every change to a work item goes
-  through `StoryService` (`src/api/story-service.ts`) and the minimal-edit writer
-  (`src/core/work-item-writer.ts`), whichever surface asks for it — HTTP, CLI or
-  browser. Rules live there once;
+- **a third write path for work items.** A work item changes through one of
+  two paths, and nowhere else: `StoryService` (`src/api/story-service.ts`) with
+  the minimal-edit writer (`src/core/work-item-writer.ts`) for the HTTP API and
+  CLI, and `src/core/story-edit.ts` for the browser's bulk edit and Kanban board
+  (validate the whole request, compute minimal line edits, re-parse and verify,
+  commit all-or-nothing with a conflict check). Apart from those, `storymap init`
+  writing `storymap.config.yml` is the only write;
 - **assumptions from one product.** No hard-coded directory layout, id prefix,
   label vocabulary or workflow. Every one of those is a project's own choice, and
   a project that uses none of the optional `wtype:` / `wstatus:` / `area:` labels

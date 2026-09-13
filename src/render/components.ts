@@ -64,6 +64,30 @@ export function missingCard(storyId: string): string {
 </div>`;
 }
 
+/**
+ * A Kanban card: what a Backlog.md board card shows (id, title, type,
+ * priority), plus the delivery state and owner this estate plans by. Small on
+ * purpose — the story detail page is one click away.
+ */
+export function kanbanCard(item: WorkItem, opts: { milestoneTitle?: string; showMilestone?: boolean } = {}): string {
+  const meta = [
+    priorityPill(item),
+    wstatusPill(item),
+    item.owner ? `<span class="chip ns-owner">${esc(item.owner)}</span>` : '',
+    opts.showMilestone && item.milestone ? `<span class="chip">${esc(opts.milestoneTitle ?? item.milestone)}</span>` : '',
+  ]
+    .filter(Boolean)
+    .join('');
+  return `<article class="kb-card${item.completed ? ' kb-card--completed' : ''}" draggable="true" data-id="${esc(item.id)}" data-status="${esc(item.status)}">
+  <input type="checkbox" class="sel kb-card__sel" value="${esc(item.id)}" aria-label="Select ${esc(item.id)}" />
+  <a class="kb-card__link" href="/story/${q(item.id)}" draggable="false" aria-label="Open ${esc(item.id)}: ${esc(item.title)}">
+    <span class="kb-card__head"><span class="kb-card__id">${esc(item.id)}</span>${item.wtype ? `<span class="kb-card__type">${esc(item.wtype)}</span>` : ''}</span>
+    <span class="kb-card__title">${esc(item.title)}</span>
+  </a>
+  ${meta ? `<span class="kb-card__meta">${meta}</span>` : ''}
+</article>`;
+}
+
 export function labelChips(item: WorkItem): string {
   const chips: string[] = [];
   const add = (ns: string, value?: string) => {

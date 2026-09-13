@@ -41,6 +41,11 @@ export interface Project {
    * answered from this, never from a status literal.
    */
   workflow: Workflow;
+  /**
+   * Workflow statuses in board order, from `backlog.config.yml`. Empty when the
+   * project declares none; the board then uses Backlog.md's defaults.
+   */
+  statuses: string[];
   storymapConfigPath?: string;
   backlogConfigPath?: string;
   /** Nearest enclosing Git repository, when the project is inside one. */
@@ -209,6 +214,9 @@ export function loadProject(discovery: Discovery): Project {
     port: typeof rawPort === 'number' ? rawPort : DEFAULT_PORT,
     completedStatuses,
     workflow,
+    statuses: Array.isArray(backlogDoc.statuses)
+      ? backlogDoc.statuses.filter((s): s is string => typeof s === 'string' && s.trim() !== '').map((s) => s.trim())
+      : [],
     ...(discovery.storymapConfigPath ? { storymapConfigPath: discovery.storymapConfigPath } : {}),
     ...(discovery.backlogConfigPath ? { backlogConfigPath: discovery.backlogConfigPath } : {}),
     ...(discovery.gitRoot ? { gitRoot: discovery.gitRoot } : {}),
