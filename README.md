@@ -140,9 +140,34 @@ storyMaps:
 | `storyMaps.directory` | `story-maps` inside the backlog directory |
 | `browser.port` | `6480` |
 | `projectName` | `project_name` from `backlog.config.yml`, else the folder name |
+| `backlog.completedStatuses` | none — only `completed/` marks an item delivered |
+| `workflow.laneOrder` | unfinished statuses most-advanced first, then the done statuses |
+| `workflow.doneStatuses` | the last status in `backlog.config.yml` |
+| `workflow.activeStatuses` | the status declared just before the first done status |
 
 Directories must stay inside the project; an absolute or escaping path is
 refused by name rather than quietly clamped.
+
+### Workflow
+
+Statuses are yours. StoryMap.md reads them from `statuses` and `default_status`
+in `backlog.config.yml` — Backlog.md's `To Do`, `In Progress`, `Done` when the
+project declares none — and never compares a status against a fixed word. The
+`workflow` keys only say how to lane them. A project that tracks how far work has
+shipped might write:
+
+```yaml
+backlog:
+  completedStatuses: [Done - Production]   # terminal: drawn as delivered
+workflow:
+  laneOrder: [In Progress, Review, Ready, Backlog, Done - Local, Done - Integrated, Done - Production]
+  doneStatuses: [Done - Local, Done - Integrated, Done - Production]
+  activeStatuses: [In Progress, Review]
+```
+
+`laneOrder` must place every configured status exactly once, and every name in
+these keys must be a configured status: a mismatch is refused by name when the
+project loads, never drawn wrongly.
 
 ## The story-map model
 
@@ -160,9 +185,13 @@ A map holds structure and story ids — never a copy of a story's title, status 
 body. Those come from the work item, so there is exactly one place a story can be
 edited, and the map cannot drift out of date about its contents.
 
-The browser can also lane by **workflow** instead of by release slice — Blocked,
-In progress, To do, Backlog, Closed, Done — derived from each story's own state
-rather than from the map. Done sits at the bottom, where finished work belongs.
+The browser can also lane by **workflow** instead of by release slice — one lane
+per configured status, in the workflow's lane order, derived from each story's
+own status rather than from the map. The done statuses sit at the bottom, where
+finished work belongs. A `wstatus:` label only adds the exceptions a status
+cannot say: *Blocked / needs decision* for unfinished work, and *Closed without
+delivery* (`cancelled`, `superseded`) just above the done lanes. A status the
+project does not declare gets an *Unknown status* lane rather than a guess.
 
 ## Writing a map
 

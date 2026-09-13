@@ -117,7 +117,19 @@ function plainBody(rest: string): string {
     .trim();
 }
 
-export function parseWorkItem(raw: string, sourcePath: string, completed: boolean): { item?: WorkItem; problems: ReadProblem[] } {
+/**
+ * `archived` is the directory signal: the file lives in `completed/`.
+ * `completedStatuses` adds the workflow signal, for projects whose delivered
+ * work stays in `tasks/` and is marked by a terminal status instead. An item is
+ * completed when either says so; neither alone is authoritative, because
+ * Backlog.md archives by moving files and never reads `completed/` back.
+ */
+export function parseWorkItem(
+  raw: string,
+  sourcePath: string,
+  archived: boolean,
+  completedStatuses: readonly string[] = [],
+): { item?: WorkItem; problems: ReadProblem[] } {
   const problems: ReadProblem[] = [];
   const match = FRONT_MATTER.exec(raw);
   if (!match) {
@@ -170,7 +182,7 @@ export function parseWorkItem(raw: string, sourcePath: string, completed: boolea
     frontmatter: front,
     milestone: typeof front.milestone === 'string' && front.milestone.trim() ? front.milestone.trim() : undefined,
     sourcePath,
-    completed,
+    completed: archived || completedStatuses.includes(status),
     createdDate: typeof front.created_date === 'string' ? front.created_date : undefined,
     updatedDate: typeof front.updated_date === 'string' ? front.updated_date : undefined,
     area: found.area,
@@ -184,7 +196,13 @@ export function parseWorkItem(raw: string, sourcePath: string, completed: boolea
   return { item, problems };
 }
 
-function readDir(dir: string, repoRoot: string, completed: boolean, out: BacklogReadResult): void {
+function readDir(
+  dir: string,
+  repoRoot: string,
+  archived: boolean,
+  out: BacklogReadResult,
+  completedStatuses: readonly string[],
+): void {
   let entries: string[];
   try {
     entries = readdirSync(dir);
@@ -196,7 +214,7 @@ function readDir(dir: string, repoRoot: string, completed: boolean, out: Backlog
     const full = join(dir, name);
     if (!statSync(full).isFile()) continue;
     const rel = relative(repoRoot, full);
-    const { item, problems } = parseWorkItem(readFileSync(full, 'utf8'), rel, completed);
+    const { item, problems } = parseWorkItem(readFileSync(full, 'utf8'), rel, archived, completedStatuses);
     out.problems.push(...problems);
     if (item) out.items.push(item);
   }
@@ -209,6 +227,11 @@ export interface BacklogPaths {
   backlogDir: string;
   /** Absolute path of the story-map YAML directory. */
   storyMapsDir: string;
+  /**
+   * Statuses that mean delivered. Empty (the default) leaves `completed/` as
+   * the only completion signal, which is Backlog.md's own behaviour.
+   */
+  completedStatuses?: readonly string[];
 }
 
 /**
@@ -220,12 +243,14 @@ export function resolveBacklogPaths(
   repoRoot: string,
   backlogDirectory = 'backlog',
   storyMapsDirectory?: string,
+  completedStatuses: readonly string[] = [],
 ): BacklogPaths {
   const backlogDir = join(repoRoot, backlogDirectory);
   return {
     repoRoot,
     backlogDir,
     storyMapsDir: storyMapsDirectory ? join(repoRoot, storyMapsDirectory) : join(backlogDir, 'story-maps'),
+    completedStatuses,
   };
 }
 
@@ -278,7 +303,8 @@ export function readMilestones(paths: BacklogPaths): Milestone[] {
 /** Reads `tasks/` and `completed/`. Problems are collected, never thrown. */
 export function readBacklog(paths: BacklogPaths): BacklogReadResult {
   const result: BacklogReadResult = { items: [], problems: [] };
-  readDir(join(paths.backlogDir, 'tasks'), paths.repoRoot, false, result);
-  readDir(join(paths.backlogDir, 'completed'), paths.repoRoot, true, result);
+  const completedStatuses = paths.completedStatuses ?? [];
+  readDir(join(paths.backlogDir, 'tasks'), paths.repoRoot, false, result, completedStatuses);
+  readDir(join(paths.backlogDir, 'completed'), paths.repoRoot, true, result, completedStatuses);
   return result;
 }

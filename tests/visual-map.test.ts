@@ -306,7 +306,7 @@ describe('workflow lanes, work type, legend and shell', () => {
     assert.ok(body.includes('Workflow state (derived)'));
     assert.ok(body.includes("derived from each story's <strong>workflow state</strong>".replace(/<[^>]+>/g, '')) ||
       body.includes('workflow state'), 'the note names the mode it is actually in');
-    assert.ok(body.includes('IN PROGRESS') || body.includes('In progress'));
+    assert.ok(body.includes('>In Progress<'), 'a lane is titled with the configured status');
   });
 
   test('Done is the bottom lane in the rendered wall', async () => {

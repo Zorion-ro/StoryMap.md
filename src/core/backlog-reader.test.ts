@@ -119,6 +119,13 @@ describe('parseWorkItem', () => {
     assert.equal(item.updatedDate, '2026-08-22 19:01');
   });
 
+  test('a configured terminal status marks an item completed outside completed/', () => {
+    // ACTIVE is `In Progress`: listing it as terminal must complete it; listing another status must not.
+    assert.equal(parseWorkItem(ACTIVE, 'backlog/tasks/x.md', false, ['In Progress']).item!.completed, true);
+    assert.equal(parseWorkItem(ACTIVE, 'backlog/tasks/x.md', false, ['Released']).item!.completed, false);
+    assert.equal(parseWorkItem(ACTIVE, 'backlog/completed/x.md', true, []).item!.completed, true, 'the directory still counts');
+  });
+
   test('preserves unknown front-matter keys instead of dropping them', () => {
     const { item } = parseWorkItem(ACTIVE, 'x.md', false);
     // Backlog.md 1.50.1 discards keys it does not know on edit. This tool must not.

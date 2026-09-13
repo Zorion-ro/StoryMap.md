@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, describe, before, after } from 'node:test';
 import { Workspace, fingerprint } from './workspace';
-import { buildVisualStoryMap, cardsAt, deliveryLaneFor, toneFor, workflowLaneFor, workTypeFor } from './visual-model';
+import { buildVisualStoryMap, cardsAt, deliveryLaneFor, statusLaneId, toneFor, workflowLaneFor, workflowLanes, workTypeFor } from './visual-model';
+import { resolveWorkflow } from './workflow';
 import type { WorkItem } from './types';
 import { filterStories, facets } from './queries';
 
@@ -276,54 +277,106 @@ describe('workflowLaneFor — the planning classifier', () => {
       ...o,
     }) as WorkItem;
 
-  test('work under way lands in In Progress', () => {
-    assert.equal(workflowLaneFor(item({ status: 'In Progress', wstatus: 'in_progress' })), 'in-progress');
-    assert.equal(workflowLaneFor(item({ status: 'In Progress', wstatus: 'deployed_partial' })), 'in-progress');
+  const lane = (status: string) => statusLaneId(status);
+
+  test('the status decides: each configured status is its own lane', () => {
+    assert.equal(workflowLaneFor(item({ status: 'In Progress', wstatus: 'in_progress' })), lane('In Progress'));
+    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'ready' })), lane('To Do'));
+    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'done' })), lane('Done'));
+    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'done', completed: true })), lane('Done'));
   });
 
-  test('ready and todo land in To Do', () => {
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'ready' })), 'todo');
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'todo' })), 'todo');
+  test('a delivery label never moves a story out of its status lane', () => {
+    // wstatus is for exceptions. A stale or richer label must not overrule the
+    // workflow position the project itself recorded — in either direction.
+    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'implemented_not_deployed' })), lane('Done'));
+    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'backlog' })), lane('Done'));
+    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'done' })), lane('To Do'));
+    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'invented-value' })), lane('To Do'));
+    assert.equal(workflowLaneFor(item({ status: 'In Progress' })), lane('In Progress'), 'no wstatus at all');
   });
 
-  test('backlog lands in Backlog', () => {
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'backlog' })), 'backlog');
+  test('blocked and needs-decision share one visible lane, in any spelling', () => {
+    for (const w of ['blocked', 'needs-decision', 'needs_decision', 'blocked-needs-decision', 'Blocked needs decision']) {
+      assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: w })), 'blocked', w);
+    }
   });
 
-  test('really finished work lands in Done', () => {
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'done' })), 'done');
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'done', completed: true })), 'done');
+  test('a done status outranks a blocked label', () => {
+    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'blocked' })), lane('Done'));
   });
 
-  test('Done in name only is NOT Done', () => {
-    // Five stories in this estate are exactly this: the coarse status says Done
-    // while the delivery label says the work is not on a host yet.
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'implemented_not_deployed' })), 'in-progress');
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'implemented_pending_deploy' })), 'in-progress');
-    // And a stale planning label outranks a Done status in the other direction.
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'backlog' })), 'backlog');
-  });
-
-  test('blocked and needs-decision share one visible lane', () => {
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'blocked' })), 'blocked');
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'needs-decision' })), 'blocked');
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'blocked-needs-decision' })), 'blocked');
-  });
-
-  test('closed without delivery is neither Done nor Backlog', () => {
+  test('closed without delivery is neither Done nor an unfinished lane', () => {
     assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'cancelled' })), 'closed');
-    assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'superseded' })), 'closed');
+    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'superseded' })), 'closed');
     assert.equal(workflowLaneFor(item({ status: 'Done', wstatus: 'cancelled', completed: true })), 'closed');
   });
 
-  test('an unknown wstatus falls back to the coarse status, never silently to Done', () => {
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'invented-value' })), 'backlog');
-    assert.equal(workflowLaneFor(item({ status: 'In Progress', wstatus: 'invented-value' })), 'in-progress');
-    assert.equal(workflowLaneFor(item({ status: 'To Do' })), 'backlog', 'no wstatus at all');
+  test('a story that reached production is never shown as unfinished', () => {
+    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'backlog', completed: true })), lane('Done'));
   });
 
-  test('a story that reached production is never shown as backlog', () => {
-    assert.equal(workflowLaneFor(item({ status: 'To Do', wstatus: 'backlog', completed: true })), 'done');
+  test('a status the project does not declare is shown as unknown, never guessed', () => {
+    assert.equal(workflowLaneFor(item({ status: 'Shipped' })), 'status-unknown');
+    assert.equal(workflowLaneFor(item({ status: 'Shipped', completed: true })), 'status-unknown');
+  });
+
+  test('status names match case-insensitively, as Backlog.md matches them', () => {
+    assert.equal(workflowLaneFor(item({ status: 'in progress' })), lane('In Progress'));
+  });
+
+  describe('with a deployment-aware vocabulary', () => {
+    const workflow = resolveWorkflow({
+      statuses: ['Backlog', 'Ready', 'In Progress', 'Review', 'Done - Local', 'Done - Integrated', 'Done - Production'],
+      defaultStatus: 'Backlog',
+      laneOrder: ['In Progress', 'Review', 'Ready', 'Backlog', 'Done - Local', 'Done - Integrated', 'Done - Production'],
+      doneStatuses: ['Done - Local', 'Done - Integrated', 'Done - Production'],
+      activeStatuses: ['In Progress', 'Review'],
+      completedStatuses: ['Done - Production'],
+    });
+
+    test('the three done levels are three lanes, not one and not backlog', () => {
+      // The defect this replaces: `Done - Local` matched no literal and fell to backlog.
+      for (const w of [undefined, 'implemented-not-deployed', 'in-progress', 'done-local', 'backlog']) {
+        assert.equal(workflowLaneFor(item({ status: 'Done - Local', wstatus: w }), workflow), lane('Done - Local'), String(w));
+      }
+      assert.equal(workflowLaneFor(item({ status: 'Done - Integrated' }), workflow), lane('Done - Integrated'));
+      assert.equal(workflowLaneFor(item({ status: 'Done - Production', completed: true }), workflow), lane('Done - Production'));
+    });
+
+    test('review is a lane of its own', () => {
+      assert.equal(workflowLaneFor(item({ status: 'Review' }), workflow), lane('Review'));
+    });
+
+    test('a story in completed/ with an unadvanced status lands in the most-shipped lane', () => {
+      assert.equal(workflowLaneFor(item({ status: 'Backlog', completed: true }), workflow), lane('Done - Production'));
+    });
+
+    test('the bare Done of another vocabulary is unknown here', () => {
+      assert.equal(workflowLaneFor(item({ status: 'Done' }), workflow), 'status-unknown');
+    });
+
+    test('lanes follow the declared order, closed above the done levels, production last', () => {
+      assert.deepEqual(
+        workflowLanes(workflow).map((l) => l.title),
+        ['Blocked / needs decision', 'Unknown status', 'In Progress', 'Review', 'Ready', 'Backlog',
+          'Closed without delivery', 'Done - Local', 'Done - Integrated', 'Done - Production'],
+      );
+      assert.deepEqual(
+        workflowLanes(workflow).map((l) => l.tone),
+        ['blocked', 'neutral', 'progress', 'progress', 'next', 'later', 'closed', 'built', 'built', 'delivered'],
+      );
+    });
+
+    test('tones and delivery lanes read the same vocabulary', () => {
+      assert.equal(toneFor(item({ status: 'Done - Local' }), workflow), 'done');
+      assert.equal(toneFor(item({ status: 'Review' }), workflow), 'progress');
+      assert.equal(toneFor(item({ status: 'Backlog' }), workflow), 'backlog');
+      assert.equal(toneFor(item({ status: 'Ready' }), workflow), 'todo');
+      assert.equal(deliveryLaneFor(item({ status: 'Done - Integrated' }), workflow), 'built');
+      assert.equal(deliveryLaneFor(item({ status: 'Review' }), workflow), 'in-progress');
+      assert.equal(deliveryLaneFor(item({ status: 'Done - Local', wstatus: 'cancelled' }), workflow), 'later');
+    });
   });
 });
 
@@ -358,8 +411,8 @@ describe('lane ordering — Done is always last', () => {
     const ws2 = Workspace.load(dir);
 
     const workflow = buildVisualStoryMap(ws2.resolve('m')!, { laneMode: 'workflow' });
-    assert.deepEqual(workflow.lanes.map((l) => l.id), ['blocked', 'in-progress', 'todo', 'backlog', 'closed', 'done']);
-    assert.equal(workflow.lanes[workflow.lanes.length - 1].id, 'done', 'Done is the bottom lane');
+    assert.deepEqual(workflow.lanes.map((l) => l.id), ['blocked', 'status:In Progress', 'status:To Do', 'closed', 'status:Done']);
+    assert.equal(workflow.lanes[workflow.lanes.length - 1].id, 'status:Done', 'Done is the bottom lane');
 
     const delivery = buildVisualStoryMap(ws2.resolve('m')!, { laneMode: 'delivery' });
     assert.equal(

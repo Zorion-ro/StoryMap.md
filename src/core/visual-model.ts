@@ -1,5 +1,7 @@
 import type { ResolvedStoryMap, StoryMap, WorkItem } from './types';
 import { normalizeId } from './work-item-index';
+import { DEFAULT_WORKFLOW, normalizeWstatus } from './workflow';
+import type { Workflow } from './workflow';
 
 /**
  * A UI-ready projection of a resolved story map.
@@ -19,7 +21,7 @@ export type CardTone = 'done' | 'progress' | 'todo' | 'blocked' | 'backlog' | 'm
 export interface VisualCard {
   storyId: string;
   title: string;
-  /** Coarse Backlog.md status: To Do | In Progress | Done. */
+  /** The Backlog.md status, in the project's own vocabulary. */
   status: string;
   /** Richer delivery state from a `wstatus:` label, kept separate from `status`. */
   wstatus?: string;
@@ -123,66 +125,85 @@ const DELIVERY_LANES: { id: string; title: string; tone: LaneTone }[] = [
 ];
 
 /**
- * Workflow lanes: the planning view. Ordered by how much attention each state
- * wants, and **Done is last**, always.
- */
-export type WorkflowLaneId = 'blocked' | 'in-progress' | 'todo' | 'backlog' | 'closed' | 'done';
-
-const WORKFLOW_LANES: { id: WorkflowLaneId; title: string; tone: LaneTone }[] = [
-  { id: 'blocked', title: 'Blocked / needs decision', tone: 'blocked' },
-  { id: 'in-progress', title: 'In progress', tone: 'progress' },
-  { id: 'todo', title: 'To do', tone: 'next' },
-  { id: 'backlog', title: 'Backlog', tone: 'later' },
-  { id: 'closed', title: 'Closed without delivery', tone: 'closed' },
-  { id: 'done', title: 'Done', tone: 'delivered' },
-];
-
-/**
- * `wstatus` decides; the coarse status is only the fallback.
+ * Workflow lanes: the planning view. One lane per configured status, in the
+ * workflow's lane order, plus three lanes for what a status cannot say:
  *
- * That single rule handles every contradiction the estate actually contains,
- * including the case that matters most: a story marked `status: Done` while its
- * `wstatus` says `implemented_not_deployed` is **not** done — five stories are
- * in exactly that state today, and calling them finished would hide the work
- * that is left.
+ * - `blocked` — an unfinished story whose `wstatus` says it cannot proceed;
+ * - `status-unknown` — a status the project does not declare. It is shown, by
+ *   name, rather than guessed at: a guess is how finished work ends up in the
+ *   least-finished lane;
+ * - `closed` — closed without delivery, placed immediately above the done
+ *   lanes, because it is neither unfinished nor done.
+ *
+ * The done lanes come last, in lane order, so the most-shipped lane is always
+ * the bottom one.
  */
-const WSTATUS_WORKFLOW_LANE: Record<string, WorkflowLaneId> = {
-  blocked: 'blocked',
-  'needs-decision': 'blocked',
-  'blocked-needs-decision': 'blocked',
-  cancelled: 'closed',
-  superseded: 'closed',
-  in_progress: 'in-progress',
-  implemented_not_deployed: 'in-progress',
-  implemented_pending_deploy: 'in-progress',
-  deployed_partial: 'in-progress',
-  ready: 'todo',
-  todo: 'todo',
-  backlog: 'backlog',
-  done: 'done',
-};
+export const WORKFLOW_BLOCKED_LANE = 'blocked';
+export const WORKFLOW_UNKNOWN_LANE = 'status-unknown';
+export const WORKFLOW_CLOSED_LANE = 'closed';
+
+/** The lane id of a configured status. Prefixed, so no status name can collide with a fixed lane. */
+export function statusLaneId(status: string): string {
+  return `status:${status}`;
+}
+
+export function workflowLanes(workflow: Workflow = DEFAULT_WORKFLOW): { id: string; title: string; tone: LaneTone }[] {
+  const toneOf = (status: string): LaneTone => {
+    if (workflow.deliveredStatuses.includes(status)) return 'delivered';
+    switch (workflow.stageOf(status)) {
+      case 'done':
+        return 'built';
+      case 'active':
+        return 'progress';
+      case 'later':
+        return 'later';
+      default:
+        return 'next';
+    }
+  };
+  const statusLanes = workflow.laneOrder.map((s) => ({ id: statusLaneId(s), title: s, tone: toneOf(s) }));
+  const firstDone = workflow.laneOrder.findIndex((s) => workflow.isDone(s));
+  const closed = { id: WORKFLOW_CLOSED_LANE, title: 'Closed without delivery', tone: 'closed' as LaneTone };
+  const at = firstDone === -1 ? statusLanes.length : firstDone;
+  return [
+    { id: WORKFLOW_BLOCKED_LANE, title: 'Blocked / needs decision', tone: 'blocked' },
+    { id: WORKFLOW_UNKNOWN_LANE, title: 'Unknown status', tone: 'neutral' },
+    ...statusLanes.slice(0, at),
+    closed,
+    ...statusLanes.slice(at),
+  ];
+}
+
+/** `wstatus` values that take an unfinished story out of its status lane. Compared normalised. */
+const BLOCKED_WSTATUS = new Set(['blocked', 'needs_decision', 'blocked_needs_decision']);
+/** Closed without delivery. Never "almost delivered". */
+const CLOSED_WSTATUS = new Set(['cancelled', 'superseded']);
 
 /**
  * Deterministic workflow lane for one story.
  *
- * An unrecognised `wstatus` falls back to the coarse status rather than being
- * guessed at, and an undecidable story lands in `backlog` — visible and
- * obviously unplanned — never silently in `done`.
+ * **The status decides.** It is the project's own workflow position, read
+ * against the project's own vocabulary. `wstatus` is consulted only for the
+ * exceptions a status cannot express: closed without delivery, and blocked.
+ * A done status outranks a blocked label — the work is finished — and a story
+ * the directory marks completed is drawn in the most-shipped lane even when its
+ * status was never advanced.
+ *
+ * A status the project does not declare lands in `status-unknown`: visible and
+ * named, never silently in a finished or an unfinished lane.
  */
-export function workflowLaneFor(item: WorkItem): WorkflowLaneId {
-  const w = (item.wstatus ?? '').trim().toLowerCase();
-  const mapped = WSTATUS_WORKFLOW_LANE[w];
-  if (mapped) {
-    // Reaching production outranks a stale planning label, but never outranks
-    // a story that was closed without ever being delivered.
-    if (item.completed && (mapped === 'backlog' || mapped === 'todo')) return 'done';
-    return mapped;
+export function workflowLaneFor(item: WorkItem, workflow: Workflow = DEFAULT_WORKFLOW): string {
+  const w = normalizeWstatus(item.wstatus);
+  if (CLOSED_WSTATUS.has(w)) return WORKFLOW_CLOSED_LANE;
+  const status = workflow.canonical(item.status);
+  if (!status) return WORKFLOW_UNKNOWN_LANE;
+  if (workflow.isDone(status)) return statusLaneId(status);
+  if (item.completed) {
+    const done = workflow.laneOrder.filter((s) => workflow.isDone(s));
+    return statusLaneId(done[done.length - 1]);
   }
-  // Unrecognised or absent: fall back to the coarse status.
-  if (item.completed) return 'done';
-  if (item.status === 'Done') return 'done';
-  if (item.status === 'In Progress') return 'in-progress';
-  return 'backlog';
+  if (BLOCKED_WSTATUS.has(w)) return WORKFLOW_BLOCKED_LANE;
+  return statusLaneId(status);
 }
 
 /**
@@ -206,32 +227,32 @@ export function workTypeFor(item: WorkItem): string | undefined {
 const PROGRESS_WSTATUS = new Set(['in_progress', 'deployed_partial']);
 /** Finished in code, but not on a production host: the estate's own distinction. */
 const BUILT_WSTATUS = new Set(['implemented_pending_deploy', 'implemented_not_deployed']);
-/** Closed without delivery. Never "almost delivered". */
-const CLOSED_WSTATUS = new Set(['cancelled', 'superseded']);
-
 /**
  * Deterministic: same story, same lane, every time.
  *
- * `Built, not deployed` exists because this estate keeps a large population of
- * work that is `status: Done` while still sitting in `tasks/` — done in code,
- * waiting on a release. Folding those into `Later` (as an earlier version did)
- * put the most-finished work in the least-finished lane.
+ * `Built, not deployed` exists because a project can keep a large population of
+ * work that is done in code while still sitting in `tasks/`, waiting on a
+ * release. Folding those into `Later` (as an earlier version did) put the
+ * most-finished work in the least-finished lane. "Done" and "under way" are read
+ * from the project's workflow, never from a status literal.
  */
-export function deliveryLaneFor(item: WorkItem): string {
+export function deliveryLaneFor(item: WorkItem, workflow: Workflow = DEFAULT_WORKFLOW): string {
   if (item.completed) return 'delivered';
-  const w = item.wstatus ?? '';
+  const w = normalizeWstatus(item.wstatus);
   if (CLOSED_WSTATUS.has(w)) return 'later';
-  if (item.status === 'Done' || BUILT_WSTATUS.has(w)) return 'built';
-  if (item.status === 'In Progress' || PROGRESS_WSTATUS.has(w)) return 'in-progress';
+  if (workflow.isDone(item.status) || BUILT_WSTATUS.has(w)) return 'built';
+  if (workflow.isActive(item.status) || PROGRESS_WSTATUS.has(w)) return 'in-progress';
   if (w === 'ready') return 'next';
   return 'later';
 }
 
-export function toneFor(item: WorkItem): CardTone {
-  if (item.completed || item.status === 'Done') return 'done';
-  if (item.wstatus === 'blocked') return 'blocked';
-  if (item.status === 'In Progress') return 'progress';
-  if (item.wstatus === 'backlog' || item.wstatus === 'cancelled') return 'backlog';
+export function toneFor(item: WorkItem, workflow: Workflow = DEFAULT_WORKFLOW): CardTone {
+  const w = normalizeWstatus(item.wstatus);
+  const stage = workflow.stageOf(item.status);
+  if (item.completed || stage === 'done') return 'done';
+  if (w === 'blocked') return 'blocked';
+  if (stage === 'active') return 'progress';
+  if (stage === 'later' || w === 'backlog' || w === 'cancelled') return 'backlog';
   return 'todo';
 }
 
@@ -245,7 +266,7 @@ function laneToneForSlice(sliceId: string, expects?: string): LaneTone {
   return 'neutral';
 }
 
-function cardOf(item: WorkItem, supporting: boolean): VisualCard {
+function cardOf(item: WorkItem, supporting: boolean, workflow: Workflow): VisualCard {
   return {
     storyId: item.id,
     title: item.title,
@@ -256,7 +277,7 @@ function cardOf(item: WorkItem, supporting: boolean): VisualCard {
     priorityLabel: item.priorityLabel,
     area: item.area,
     completed: item.completed,
-    tone: toneFor(item),
+    tone: toneFor(item, workflow),
     missing: false,
     supporting,
   };
@@ -274,14 +295,18 @@ function missingCard(storyId: string, supporting: boolean): VisualCard {
   };
 }
 
-export function buildVisualStoryMap(resolved: ResolvedStoryMap, filter: VisualFilter = {}): VisualStoryMapModel {
+export function buildVisualStoryMap(
+  resolved: ResolvedStoryMap,
+  filter: VisualFilter = {},
+  workflow: Workflow = DEFAULT_WORKFLOW,
+): VisualStoryMapModel {
   const laneMode: LaneMode =
     filter.laneMode === 'delivery' || filter.laneMode === 'workflow' ? filter.laneMode : 'slices';
   const hideCompleted = filter.hideCompleted === true;
 
   const lanes: VisualLane[] =
     laneMode === 'workflow'
-      ? WORKFLOW_LANES.map((l) => ({ ...l, count: 0 }))
+      ? workflowLanes(workflow).map((l) => ({ ...l, count: 0 }))
       : laneMode === 'delivery'
         ? DELIVERY_LANES.map((l) => ({ ...l, count: 0 }))
         : resolved.map.releaseSlices.map((s) => ({
@@ -297,7 +322,7 @@ export function buildVisualStoryMap(resolved: ResolvedStoryMap, filter: VisualFi
    * an unresolvable id, say. Never the finished lane: we know nothing about it,
    * and "we do not know" is not "delivered".
    */
-  const unknownLaneId = laneMode === 'workflow' ? 'backlog' : laneMode === 'delivery' ? 'later' : lanes[0]?.id ?? '';
+  const unknownLaneId = laneMode === 'workflow' ? WORKFLOW_UNKNOWN_LANE : laneMode === 'delivery' ? 'later' : lanes[0]?.id ?? '';
   const cells = new Map<string, Map<string, VisualCard[]>>();
   for (const lane of lanes) cells.set(lane.id, new Map());
 
@@ -342,7 +367,7 @@ export function buildVisualStoryMap(resolved: ResolvedStoryMap, filter: VisualFi
         for (const placement of cell.placements) {
           const card = placement.missing
             ? missingCard(placement.storyId, false)
-            : cardOf(placement.item!, false);
+            : cardOf(placement.item!, false, workflow);
           if (!keep(card, placement.item)) {
             hiddenByFilter += 1;
             continue;
@@ -354,9 +379,9 @@ export function buildVisualStoryMap(resolved: ResolvedStoryMap, filter: VisualFi
           const laneId = !placement.item
             ? cell.sliceId
             : laneMode === 'workflow'
-              ? workflowLaneFor(placement.item)
+              ? workflowLaneFor(placement.item, workflow)
               : laneMode === 'delivery'
-                ? deliveryLaneFor(placement.item)
+                ? deliveryLaneFor(placement.item, workflow)
                 : cell.sliceId;
           const lane = laneById.get(laneId) ?? laneById.get(unknownLaneId) ?? lanes[0];
           if (!lane) continue; // a map with no lanes at all; the validator rejects it
@@ -375,7 +400,7 @@ export function buildVisualStoryMap(resolved: ResolvedStoryMap, filter: VisualFi
       for (const placement of step.supporting) {
         const card = placement.missing
           ? missingCard(placement.storyId, true)
-          : cardOf(placement.item!, true);
+          : cardOf(placement.item!, true, workflow);
         if (!keep(card, placement.item)) {
           hiddenByFilter += 1;
           continue;

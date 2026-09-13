@@ -72,7 +72,7 @@ export async function runInit(args: Args, cwd: string): Promise<number> {
       ? `${backlogDirectory}/story-maps`
       : base.storyMapsDirectory;
 
-  const workspace = new WorkspaceHost(root, backlogDirectory, storyMapsDirectory).get();
+  const workspace = new WorkspaceHost(root, backlogDirectory, storyMapsDirectory, base.completedStatuses).get();
   const unreadable = workspace.read.problems.filter((p) => p.kind !== 'duplicate_id');
   mark(unreadable.length === 0, `${workspace.index.size} work items found (${workspace.index.active.length} active, ${workspace.index.completed.length} completed)`);
   if (unreadable.length > 0) {

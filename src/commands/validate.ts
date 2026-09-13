@@ -44,7 +44,7 @@ function row(label: string, value: number | string): string {
 /** `storymap validate` — suitable for CI; no server, no browser, no writes. */
 export async function runValidate(args: Args, cwd: string): Promise<number> {
   const project = resolveProject(args, cwd);
-  const workspace = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory).get();
+  const workspace = new WorkspaceHost(project.root, project.backlogDirectory, project.storyMapsDirectory, project.completedStatuses).get();
   const report = validate(workspace);
   const coverage = computeCoverage(workspace);
   const t = tally(report);
